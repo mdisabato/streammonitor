@@ -64,28 +64,39 @@ class AudioStreamReader:
 
 class StreamMonitor:
     def __init__(self):
+        logger.info("Initializing Stream Monitor")
         # MQTT Configuration
         self.mqtt_host = os.getenv('MQTT_HOST', 'localhost')
         self.mqtt_port = int(os.getenv('MQTT_PORT', '1883'))
         self.mqtt_user = os.getenv('MQTT_USER')
         self.mqtt_password = os.getenv('MQTT_PASSWORD')
+        logger.info(f"MQTT Configuration - Host: {self.mqtt_host}, Port: {self.mqtt_port}")
         
         # Load stream configuration
         self.config_path = pathlib.Path('/app/config/streams.json')
+        logger.info("Loading stream configuration...")
         self.streams = self.load_stream_config()
         
         self.running = True
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+        logger.info("Stream Monitor initialized successfully")
 
     def load_stream_config(self) -> Dict:
         """Load stream configuration from file"""
         try:
+            logger.info(f"Reading configuration file from: {self.config_path}")
+            if not self.config_path.exists():
+                logger.error(f"Configuration file not found at {self.config_path}")
+                raise FileNotFoundError(f"No config file at {self.config_path}")
+                
             with open(self.config_path) as f:
                 config = json.load(f)
-                
+                logger.info("Successfully parsed configuration file")
+            
             streams = {}
             for stream_id, stream_config in config.items():
+                logger.info(f"Configuring stream: {stream_id} - {stream_config['name']} at {stream_config['url']}")
                 streams[stream_id] = {
                     "url": stream_config["url"],
                     "name": stream_config["name"],
@@ -97,6 +108,7 @@ class StreamMonitor:
                     "offline_start": None,
                     "audio_reader": AudioStreamReader()
                 }
+            logger.info(f"Successfully configured {len(streams)} streams")
             return streams
                 
         except Exception as e:
@@ -112,9 +124,11 @@ class StreamMonitor:
 
     async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs"""
+        logger.info("Publishing MQTT discovery configurations")
         base_topic = "homeassistant"
         
         for stream_id, stream in self.streams.items():
+            logger.info(f"Publishing discovery config for stream: {stream_id}")
             # Status sensor discovery
             status_config = {
                 "name": f"{stream['name']} Status",
@@ -156,6 +170,7 @@ class StreamMonitor:
                 qos=1,
                 retain=True
             )
+        logger.info("Discovery configurations published successfully")
 
     async def update_stream_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
         """Update stream state and publish to MQTT"""
@@ -168,10 +183,12 @@ class StreamMonitor:
             if online:
                 stream['online_start'] = now
                 stream['offline_start'] = None
+                logger.info(f"Stream {stream_id} is now online")
             else:
                 stream['offline_start'] = now
                 stream['online_start'] = None
                 stream['silent'] = False
+                logger.info(f"Stream {stream_id} is now offline")
             
             # Publish status state
             await client.publish(
@@ -198,6 +215,9 @@ class StreamMonitor:
             stream['silent'] = silent
             if silent:
                 stream['silence_start'] = now
+                logger.info(f"Silence detected on stream {stream_id}")
+            else:
+                logger.info(f"Audio resumed on stream {stream_id}")
             
             # Publish silence state
             await client.publish(
@@ -221,21 +241,25 @@ class StreamMonitor:
     async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
         stream = self.streams[stream_id]
+        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
         
         try:
             # Check if stream has audio
             has_audio = await stream['audio_reader'].read_stream(stream['url'])
             if has_audio:
+                logger.info(f"Stream {stream_id} is available with audio detected")
                 await self.update_stream_state(client, stream_id, True, False)
             else:
                 # If no audio detected, check if stream is actually available
                 async with aiohttp.ClientSession() as session:
+                    logger.info(f"Checking stream {stream_id} accessibility")
                     async with session.get(stream['url']) as response:
                         if response.status == 200:
                             # Stream available but silent
+                            logger.info(f"Stream {stream_id} is available but silent")
                             await self.update_stream_state(client, stream_id, True, True)
                         else:
-                            # Stream not available
+                            logger.warning(f"Stream {stream_id} is not accessible (Status: {response.status})")
                             await self.update_stream_state(client, stream_id, False)
         except Exception as e:
             logger.error(f"Error checking stream {stream_id}: {e}")
@@ -244,19 +268,24 @@ class StreamMonitor:
     async def monitor_streams(self):
         """Main monitoring loop"""
         try:
+            logger.info(f"Attempting MQTT connection to {self.mqtt_host}:{self.mqtt_port}")
             async with Client(
                 hostname=self.mqtt_host,
                 port=self.mqtt_port,
                 username=self.mqtt_user,
                 password=self.mqtt_password
             ) as client:
-                # Publish discovery configs
+                logger.info("MQTT connection established successfully")
+                logger.info("Publishing discovery configs...")
                 await self.publish_discovery(client)
+                logger.info("Discovery configs published")
                 
                 # Main monitoring loop
                 while self.running:
+                    logger.info("=== Starting stream check cycle ===")
                     for stream_id in self.streams:
                         await self.check_stream(client, stream_id)
+                    logger.info("=== Stream check cycle complete ===")
                     await asyncio.sleep(15)
                 
         except MqttError as error:
@@ -272,7 +301,9 @@ class StreamMonitor:
                 await asyncio.sleep(5)
 
 async def main():
+    logger.info("=== Stream Monitor Starting ===")
     monitor = StreamMonitor()
+    logger.info("Starting monitor process...")
     await monitor.run()
 
 if __name__ == "__main__":
