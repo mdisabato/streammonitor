@@ -138,7 +138,7 @@ class StreamMonitor:
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
                 "device_class": "connectivity",
                 "icon": "mdi:radio",
-                "value_template": "{{ value }}",
+                "value_template": "{{ value_json.silence }}",
                 "device": {
                     "identifiers": [f"stations_{stream_id}"],
                     "name": f"AzuraCast {stream['name']}",
@@ -161,7 +161,7 @@ class StreamMonitor:
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
-                "value_template": "{{ value }}",
+                "value_template": "{{ value_json.silence }}",
                 "device": {
                     "identifiers": [f"stations_{stream_id}"],
                     "name": f"AzuraCast {stream['name']}",
