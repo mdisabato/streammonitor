@@ -144,7 +144,7 @@ class StreamMonitor:
                 }
             }
             await client.publish(
-                f"{base_topic}/binary_sensor/azuracast/{stream_id}_status/config",
+                f"{base_topic}/binary_sensor/azuracast/{stream_id}/status/config",
                 payload=json.dumps(status_config).encode(),
                 qos=1,
                 retain=True
@@ -165,7 +165,7 @@ class StreamMonitor:
                 }
             }
             await client.publish(
-                f"{base_topic}/binary_sensor/azuracast/{stream_id}_silence/config",
+                f"{base_topic}/binary_sensor/azuracast/{stream_id}/silence/config",
                 payload=json.dumps(silence_config).encode(),
                 qos=1,
                 retain=True
