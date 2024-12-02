@@ -209,8 +209,8 @@ class StreamMonitor:
                 "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
             }
             await client.publish(
-                f"stations/binary_sensor/{stream_id}/silence/state",
-                payload=json.dumps({"silence": "ON" if silent else "OFF"}).encode(),
+                f"stations/binary_sensor/{stream_id}/status/attributes",  # Changed from silence/state
+                payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
             )
