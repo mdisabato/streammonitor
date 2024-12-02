@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import os
 from typing import Dict, Optional
 import aiohttp
-from aiomqtt import Client, MqttError  # Changed from asyncio_mqtt to aiomqtt
+from aiomqtt import Client, MqttError
 import signal
 import numpy as np
 import av
@@ -14,7 +14,6 @@ import threading
 from queue import Queue
 import pathlib
 
-# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -111,7 +110,7 @@ class StreamMonitor:
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-    async def publish_discovery(self, client: Client):
+async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs"""
         base_topic = "homeassistant"
         
@@ -132,7 +131,7 @@ class StreamMonitor:
             }
             await client.publish(
                 f"{base_topic}/binary_sensor/azuracast_{stream_id}_status/config",
-                payload=json.dumps(status_config),
+                payload=json.dumps(status_config).encode(),
                 qos=1,
                 retain=True
             )
@@ -153,7 +152,7 @@ class StreamMonitor:
             }
             await client.publish(
                 f"{base_topic}/binary_sensor/azuracast_{stream_id}_silence/config",
-                payload=json.dumps(silence_config),
+                payload=json.dumps(silence_config).encode(),
                 qos=1,
                 retain=True
             )
@@ -172,12 +171,12 @@ class StreamMonitor:
             else:
                 stream['offline_start'] = now
                 stream['online_start'] = None
-                stream['silent'] = False  # Reset silence state when offline
-                
+                stream['silent'] = False
+            
             # Publish status state
             await client.publish(
                 f"azuracast/{stream_id}/status/state",
-                payload="ON" if online else "OFF",
+                payload=("ON" if online else "OFF").encode(),
                 qos=1,
                 retain=True
             )
@@ -189,7 +188,7 @@ class StreamMonitor:
             }
             await client.publish(
                 f"azuracast/{stream_id}/status/attributes",
-                payload=json.dumps(attributes),
+                payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
             )
@@ -203,7 +202,7 @@ class StreamMonitor:
             # Publish silence state
             await client.publish(
                 f"azuracast/{stream_id}/silence/state",
-                payload="ON" if silent else "OFF",
+                payload=("ON" if silent else "OFF").encode(),
                 qos=1,
                 retain=True
             )
@@ -214,7 +213,7 @@ class StreamMonitor:
             }
             await client.publish(
                 f"azuracast/{stream_id}/silence/attributes",
-                payload=json.dumps(attributes),
+                payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
             )
@@ -258,7 +257,7 @@ class StreamMonitor:
                 while self.running:
                     for stream_id in self.streams:
                         await self.check_stream(client, stream_id)
-                    await asyncio.sleep(15)  # Check every 15 seconds
+                    await asyncio.sleep(15)
                 
         except MqttError as error:
             logger.error(f'MQTT Error: {error}')
@@ -270,7 +269,7 @@ class StreamMonitor:
                 await self.monitor_streams()
             except Exception as e:
                 logger.error(f"Monitor error: {e}")
-                await asyncio.sleep(5)  # Wait before reconnecting
+                await asyncio.sleep(5)
 
 async def main():
     monitor = StreamMonitor()
