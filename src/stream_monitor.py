@@ -134,8 +134,8 @@ class StreamMonitor:
             status_config = {
                 "name": f"{stream['name']} Status",
                 "unique_id": f"stations_{stream_id}_status",
-                "state_topic": f"stations/binary_sensor/stations/{stream_id}/status/state",
-                "json_attributes_topic": f"stations/binary_sensor/stations/{stream_id}/status/attributes",
+                "state_topic": f"stations/binary_sensor/{stream_id}/status/state",
+                "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
                 "device_class": "connectivity",
                 "icon": "mdi:radio",
                 "value_template": "{{ value }}",
@@ -157,8 +157,8 @@ class StreamMonitor:
             silence_config = {
                 "name": f"{stream['name']} Silence",
                 "unique_id": f"stations_{stream_id}_silence",
-                "state_topic": f"stations/binary_sensor/stations/{stream_id}/silence/state",
-                "json_attributes_topic": f"stations/binary_sensor/stations/{stream_id}/silence/attributes",
+                "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
+                "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
                 "value_template": "{{ value }}",
@@ -197,7 +197,7 @@ class StreamMonitor:
             
             # Publish status state
             await client.publish(
-                f"stations/binary_sensor/stations/{stream_id}/status/state",
+                f"stations/binary_sensor/{stream_id}/status/state",
                 payload=("ON" if online else "OFF").encode(),
                 qos=1,
                 retain=True
@@ -209,7 +209,7 @@ class StreamMonitor:
                 "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
             }
             await client.publish(
-                f"stations/binary_sensor/stations/{stream_id}/status/attributes",
+                f"stations/binary_sensor/{stream_id}/status/attributes",
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
@@ -226,7 +226,7 @@ class StreamMonitor:
             
             # Publish silence state
             await client.publish(
-                f"stations/binary_sensor/stations/{stream_id}/silence/state",
+                f"stations/binary_sensor/{stream_id}/silence/state",
                 payload=("ON" if silent else "OFF").encode(),
                 qos=1,
                 retain=True
@@ -237,7 +237,7 @@ class StreamMonitor:
                 "silence_since": stream['silence_start'].isoformat() if stream['silence_start'] else None
             }
             await client.publish(
-                f"stations/binary_sensor/stations/{stream_id}/silence/attributes",
+                f"stations/binary_sensor/{stream_id}/silence/attributes",
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
