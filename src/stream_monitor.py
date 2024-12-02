@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import os
 from typing import Dict, Optional
 import aiohttp
-from asyncio_mqtt import Client, MqttError
+from aiomqtt import Client, MqttError  # Changed from asyncio_mqtt to aiomqtt
 import signal
 import numpy as np
 import av
