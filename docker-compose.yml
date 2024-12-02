@@ -1,1 +1,20 @@
-#
+version: '3'
+
+services:
+  stream-monitor:
+    build: .
+    container_name: stream-monitor
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+    environment:
+      - MQTT_HOST=localhost
+      - MQTT_PORT=1883
+      - MQTT_USER=your_username
+      - MQTT_PASSWORD=your_password
+    # Healthcheck to ensure service is running properly
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/proc/1/') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
