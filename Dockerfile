@@ -25,5 +25,5 @@ COPY src/ .
 RUN adduser -D streammonitor
 USER streammonitor
 
-# Command to run the application
-CMD ["python", "stream_monitor.py"]#
+# Fix the CMD syntax
+CMD ["python", "stream_monitor.py"]
