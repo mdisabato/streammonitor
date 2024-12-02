@@ -1,0 +1,8 @@
+docker run -d \
+  --name stream-monitor \
+  --restart unless-stopped \
+  -v $(pwd)/config:/app/config \
+  -e MQTT_HOST=your_mqtt_host \
+  -e MQTT_USER=your_mqtt_user \
+  -e MQTT_PASSWORD=your_mqtt_password \
+  stream-monitor
