@@ -144,7 +144,7 @@ class StreamMonitor:
                 }
             }
             await client.publish(
-                f"{base_topic}/binary_sensor/azuracast/{stream_id}/status/config",
+                f"{base_topic}/binary_sensor/stations/{stream_id}/status/config",
                 payload=json.dumps(status_config).encode(),
                 qos=1,
                 retain=True
