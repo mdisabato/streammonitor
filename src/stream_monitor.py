@@ -130,6 +130,14 @@ class StreamMonitor:
         for stream_id, stream in self.streams.items():
             logger.info(f"Publishing discovery config for stream: {stream_id}")
             
+            # Common device identifier for all stations
+            device_config = {
+                "identifiers": ["azuracast_stations"],  # Single identifier for all stations
+                "name": "Radio Stations",
+                "model": "Stream Monitor",
+                "manufacturer": "Dreamsong"
+            }
+
             # Status sensor discovery
             status_config = {
                 "name": f"{stream['name']} Status",
@@ -139,13 +147,9 @@ class StreamMonitor:
                 "device_class": "connectivity",
                 "icon": "mdi:radio",
                 "value_template": "{{ value_json.status }}",
-                "device": {
-                    "identifiers": [f"stations_{stream_id}"],
-                    "name": f"AzuraCast {stream['name']}",
-                    "model": "Stream Monitor",
-                    "manufacturer": "Dreamsong"
-                }
+                "device": device_config  # Same device config for all sensors
             }
+
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/status/config",
                 payload=json.dumps(status_config).encode(),
@@ -162,13 +166,9 @@ class StreamMonitor:
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
                 "value_template": "{{ value_json.silence }}",
-                "device": {
-                    "identifiers": [f"stations_{stream_id}"],
-                    "name": f"AzuraCast {stream['name']}",
-                    "model": "Stream Monitor",
-                    "manufacturer": "Dreamsong"
-                }
+                "device": device_config  # Same device config for all sensors
             }
+            
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/silence/config",
                 payload=json.dumps(silence_config).encode(),
