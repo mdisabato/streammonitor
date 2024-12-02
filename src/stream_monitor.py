@@ -129,18 +129,21 @@ class StreamMonitor:
         
         for stream_id, stream in self.streams.items():
             logger.info(f"Publishing discovery config for stream: {stream_id}")
+            
             # Status sensor discovery
             status_config = {
                 "name": f"{stream['name']} Status",
-                "unique_id": f"stations_{stream_id}_status",
-                "state_topic": f"stations/{stream_id}/status/state",
-                "json_attributes_topic": f"stations/{stream_id}/status/attributes",
+                "unique_id": f"azuracast_{stream_id}_status",
+                "state_topic": f"azuracast/binary_sensor/stations/{stream_id}/status/state",
+                "json_attributes_topic": f"azuracast/binary_sensor/stations/{stream_id}/status/attributes",
                 "device_class": "connectivity",
+                "icon": "mdi:radio",
+                "value_template": "{{ value }}",
                 "device": {
-                    "identifiers": [f"stations_{stream_id}"],
+                    "identifiers": [f"azuracast_{stream_id}"],
                     "name": f"AzuraCast {stream['name']}",
                     "model": "Stream Monitor",
-                    "manufacturer": "Dreamsong"
+                    "manufacturer": "AzuraCast"
                 }
             }
             await client.publish(
@@ -153,15 +156,17 @@ class StreamMonitor:
             # Silence sensor discovery
             silence_config = {
                 "name": f"{stream['name']} Silence",
-                "unique_id": f"stations_{stream_id}_silence",
-                "state_topic": f"stations/{stream_id}/silence/state",
-                "json_attributes_topic": f"stations/{stream_id}/silence/attributes",
+                "unique_id": f"azuracast_{stream_id}_silence",
+                "state_topic": f"azuracast/binary_sensor/stations/{stream_id}/silence/state",
+                "json_attributes_topic": f"azuracast/binary_sensor/stations/{stream_id}/silence/attributes",
                 "device_class": "sound",
+                "icon": "mdi:volume-off",
+                "value_template": "{{ value }}",
                 "device": {
-                    "identifiers": [f"stations_{stream_id}"],
+                    "identifiers": [f"azuracast_{stream_id}"],
                     "name": f"AzuraCast {stream['name']}",
                     "model": "Stream Monitor",
-                    "manufacturer": "Dreamsong"
+                    "manufacturer": "AzuraCast"
                 }
             }
             await client.publish(
@@ -192,7 +197,7 @@ class StreamMonitor:
             
             # Publish status state
             await client.publish(
-                f"stations/{stream_id}/status/state",
+                f"azuracast/binary_sensor/stations/{stream_id}/status/state",
                 payload=("ON" if online else "OFF").encode(),
                 qos=1,
                 retain=True
@@ -204,7 +209,7 @@ class StreamMonitor:
                 "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
             }
             await client.publish(
-                f"stations/{stream_id}/status/attributes",
+                f"azuracast/binary_sensor/stations/{stream_id}/status/attributes",
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
@@ -221,7 +226,7 @@ class StreamMonitor:
             
             # Publish silence state
             await client.publish(
-                f"stations/{stream_id}/silence/state",
+                f"azuracast/binary_sensor/stations/{stream_id}/silence/state",
                 payload=("ON" if silent else "OFF").encode(),
                 qos=1,
                 retain=True
@@ -232,7 +237,7 @@ class StreamMonitor:
                 "silence_since": stream['silence_start'].isoformat() if stream['silence_start'] else None
             }
             await client.publish(
-                f"stations/{stream_id}/silence/attributes",
+                f"azuracast/binary_sensor/stations/{stream_id}/silence/attributes",
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
