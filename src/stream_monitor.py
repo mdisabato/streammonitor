@@ -1,3 +1,4 @@
+import signal
 import asyncio
 import json
 import logging
@@ -6,7 +7,6 @@ import os
 from typing import Dict, Optional
 import aiohttp
 from aiomqtt import Client, MqttError
-import signal
 import numpy as np
 import av
 import io
@@ -111,112 +111,112 @@ class StreamMonitor:
                 stream['audio_reader'].stop()
 
     async def publish_discovery(self, client: Client):
-            """Publish Home Assistant MQTT discovery configs"""
-            base_topic = "homeassistant"
+        """Publish Home Assistant MQTT discovery configs"""
+        base_topic = "homeassistant"
+        
+        for stream_id, stream in self.streams.items():
+            # Status sensor discovery
+            status_config = {
+                "name": f"{stream['name']} Status",
+                "unique_id": f"azuracast_{stream_id}_status",
+                "state_topic": f"azuracast/{stream_id}/status/state",
+                "json_attributes_topic": f"azuracast/{stream_id}/status/attributes",
+                "device_class": "connectivity",
+                "device": {
+                    "identifiers": [f"azuracast_{stream_id}"],
+                    "name": f"AzuraCast {stream['name']}",
+                    "model": "Stream Monitor",
+                    "manufacturer": "AzuraCast"
+                }
+            }
+            await client.publish(
+                f"{base_topic}/binary_sensor/azuracast_{stream_id}_status/config",
+                payload=json.dumps(status_config).encode(),
+                qos=1,
+                retain=True
+            )
             
-            for stream_id, stream in self.streams.items():
-                # Status sensor discovery
-                status_config = {
-                    "name": f"{stream['name']} Status",
-                    "unique_id": f"azuracast_{stream_id}_status",
-                    "state_topic": f"azuracast/{stream_id}/status/state",
-                    "json_attributes_topic": f"azuracast/{stream_id}/status/attributes",
-                    "device_class": "connectivity",
-                    "device": {
-                        "identifiers": [f"azuracast_{stream_id}"],
-                        "name": f"AzuraCast {stream['name']}",
-                        "model": "Stream Monitor",
-                        "manufacturer": "AzuraCast"
-                    }
+            # Silence sensor discovery
+            silence_config = {
+                "name": f"{stream['name']} Silence",
+                "unique_id": f"azuracast_{stream_id}_silence",
+                "state_topic": f"azuracast/{stream_id}/silence/state",
+                "json_attributes_topic": f"azuracast/{stream_id}/silence/attributes",
+                "device_class": "sound",
+                "device": {
+                    "identifiers": [f"azuracast_{stream_id}"],
+                    "name": f"AzuraCast {stream['name']}",
+                    "model": "Stream Monitor",
+                    "manufacturer": "AzuraCast"
                 }
-                await client.publish(
-                    f"{base_topic}/binary_sensor/azuracast_{stream_id}_status/config",
-                    payload=json.dumps(status_config).encode(),
-                    qos=1,
-                    retain=True
-                )
-                
-                # Silence sensor discovery
-                silence_config = {
-                    "name": f"{stream['name']} Silence",
-                    "unique_id": f"azuracast_{stream_id}_silence",
-                    "state_topic": f"azuracast/{stream_id}/silence/state",
-                    "json_attributes_topic": f"azuracast/{stream_id}/silence/attributes",
-                    "device_class": "sound",
-                    "device": {
-                        "identifiers": [f"azuracast_{stream_id}"],
-                        "name": f"AzuraCast {stream['name']}",
-                        "model": "Stream Monitor",
-                        "manufacturer": "AzuraCast"
-                    }
-                }
-                await client.publish(
-                    f"{base_topic}/binary_sensor/azuracast_{stream_id}_silence/config",
-                    payload=json.dumps(silence_config).encode(),
-                    qos=1,
-                    retain=True
-                )
-    
-        async def update_stream_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
-            """Update stream state and publish to MQTT"""
-            stream = self.streams[stream_id]
-            now = datetime.now(timezone.utc)
+            }
+            await client.publish(
+                f"{base_topic}/binary_sensor/azuracast_{stream_id}_silence/config",
+                payload=json.dumps(silence_config).encode(),
+                qos=1,
+                retain=True
+            )
+
+    async def update_stream_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
+        """Update stream state and publish to MQTT"""
+        stream = self.streams[stream_id]
+        now = datetime.now(timezone.utc)
+        
+        # Handle online/offline state
+        if online != stream['online']:
+            stream['online'] = online
+            if online:
+                stream['online_start'] = now
+                stream['offline_start'] = None
+            else:
+                stream['offline_start'] = now
+                stream['online_start'] = None
+                stream['silent'] = False
             
-            # Handle online/offline state
-            if online != stream['online']:
-                stream['online'] = online
-                if online:
-                    stream['online_start'] = now
-                    stream['offline_start'] = None
-                else:
-                    stream['offline_start'] = now
-                    stream['online_start'] = None
-                    stream['silent'] = False
-                
-                # Publish status state
-                await client.publish(
-                    f"azuracast/{stream_id}/status/state",
-                    payload=("ON" if online else "OFF").encode(),
-                    qos=1,
-                    retain=True
-                )
-                
-                # Publish status attributes
-                attributes = {
-                    "online_since": stream['online_start'].isoformat() if stream['online_start'] else None,
-                    "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
-                }
-                await client.publish(
-                    f"azuracast/{stream_id}/status/attributes",
-                    payload=json.dumps(attributes).encode(),
-                    qos=1,
-                    retain=True
-                )
+            # Publish status state
+            await client.publish(
+                f"azuracast/{stream_id}/status/state",
+                payload=("ON" if online else "OFF").encode(),
+                qos=1,
+                retain=True
+            )
             
-            # Handle silence state if stream is online
-            if online and silent is not None and silent != stream['silent']:
-                stream['silent'] = silent
-                if silent:
-                    stream['silence_start'] = now
-                
-                # Publish silence state
-                await client.publish(
-                    f"azuracast/{stream_id}/silence/state",
-                    payload=("ON" if silent else "OFF").encode(),
-                    qos=1,
-                    retain=True
-                )
-                
-                # Publish silence attributes
-                attributes = {
-                    "silence_since": stream['silence_start'].isoformat() if stream['silence_start'] else None
-                }
-                await client.publish(
-                    f"azuracast/{stream_id}/silence/attributes",
-                    payload=json.dumps(attributes).encode(),
-                    qos=1,
-                    retain=True
-                )
+            # Publish status attributes
+            attributes = {
+                "online_since": stream['online_start'].isoformat() if stream['online_start'] else None,
+                "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
+            }
+            await client.publish(
+                f"azuracast/{stream_id}/status/attributes",
+                payload=json.dumps(attributes).encode(),
+                qos=1,
+                retain=True
+            )
+        
+        # Handle silence state if stream is online
+        if online and silent is not None and silent != stream['silent']:
+            stream['silent'] = silent
+            if silent:
+                stream['silence_start'] = now
+            
+            # Publish silence state
+            await client.publish(
+                f"azuracast/{stream_id}/silence/state",
+                payload=("ON" if silent else "OFF").encode(),
+                qos=1,
+                retain=True
+            )
+            
+            # Publish silence attributes
+            attributes = {
+                "silence_since": stream['silence_start'].isoformat() if stream['silence_start'] else None
+            }
+            await client.publish(
+                f"azuracast/{stream_id}/silence/attributes",
+                payload=json.dumps(attributes).encode(),
+                qos=1,
+                retain=True
+            )
 
     async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
