@@ -209,7 +209,7 @@ class StreamMonitor:
             
             # Publish status state
             await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/state",
+                f"radio-stations/binary_sensor/{stream_id}/status/state",  # Changed path
                 payload=json.dumps({"status": "on" if online else "off"}).encode(),
                 qos=1,
                 retain=True
@@ -221,7 +221,7 @@ class StreamMonitor:
                 "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
             }
             await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/attributes",  # Changed from silence/state
+                f"radio-stations/binary_sensor/{stream_id}/status/attributes",  # Changed path
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
