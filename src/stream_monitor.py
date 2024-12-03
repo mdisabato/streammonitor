@@ -1,3 +1,7 @@
+
+#!/usr/bin/env python3
+
+# Standard library imports
 import signal
 import asyncio
 import json
@@ -5,21 +9,32 @@ import logging
 from datetime import datetime, timezone
 import os
 from typing import Dict, Optional
+import pathlib
+import threading
+from queue import Queue
+
+# Third-party imports
 import aiohttp
 from aiomqtt import Client, MqttError
 import numpy as np
 import av
 import io
-import threading
-from queue import Queue
-import pathlib
 
+# Set up logging similar to system_sensors.py
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Exception handling for graceful shutdown
+class ProgramKilled(Exception):
+    pass
+
+def signal_handler(signum, frame):
+    raise ProgramKilled
+
+# This class remains largely unchanged as it handles our specialized audio stream reading
 class AudioStreamReader:
     def __init__(self, chunk_size=1024*8):
         self.chunk_size = chunk_size
@@ -65,7 +80,12 @@ class AudioStreamReader:
 class StreamMonitor:
     def __init__(self):
         logger.info("Initializing Stream Monitor")
-        # MQTT Configuration
+        # Similar to system_sensors, initialize basic variables
+        self.mqtt_client = None
+        self.running = True
+        self.devicename = "radio-stations"  # Changed from individual station names to single device
+
+        # MQTT Configuration - simplified to match system_sensors pattern
         self.mqtt_host = os.getenv('MQTT_HOST', 'localhost')
         self.mqtt_port = int(os.getenv('MQTT_PORT', '1883'))
         self.mqtt_user = os.getenv('MQTT_USER')
@@ -77,7 +97,7 @@ class StreamMonitor:
         logger.info("Loading stream configuration...")
         self.streams = self.load_stream_config()
         
-        self.running = True
+        # Signal handling similar to system_sensors
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         logger.info("Stream Monitor initialized successfully")
@@ -116,91 +136,48 @@ class StreamMonitor:
             raise
 
     def signal_handler(self, signum, frame):
+        """Signal handler for graceful shutdown"""
         logger.info("Shutdown signal received")
         self.running = False
         for stream in self.streams.values():
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-    async def publish_discovery(self, client: Client):
-        """Publish Home Assistant MQTT discovery configs"""
-        logger.info("Publishing MQTT discovery configurations")
-        base_topic = "homeassistant"
-        
+    # Following system_sensors pattern of defining sensor properties
+    def build_base_sensors(self, stream_id: str, stream_name: str) -> dict:
+        """Build base sensor configurations for a stream"""
+        return {
+            f'{stream_id}_status': {
+                'name': f'{stream_name} Status',
+                'class': 'connectivity',  # Similar to system_sensors device_class
+                'sensor_type': 'binary_sensor',
+                'icon': 'mdi:radio',
+                'function': lambda: 'online' if self.streams[stream_id]['online'] else 'offline'
+            },
+            f'{stream_id}_silence': {
+                'name': f'{stream_name} Silence',
+                'class': 'problem',  # Matching system_sensors power_status sensor
+                'sensor_type': 'binary_sensor',
+                'icon': 'mdi:volume-off',
+                'function': lambda: 'on' if self.streams[stream_id]['silent'] else 'off'
+            }
+        }
+
+    def build_sensors(self):
+        """Build all sensor configurations"""
+        sensors = {}
         for stream_id, stream in self.streams.items():
-            logger.info(f"Publishing discovery config for stream: {stream_id}")
-            
-            # Common device identifier for all stations
-            device_config = {
-                "identifiers": ["azuracast_stations"],  # Single identifier for all stations
-                "name": "Radio Stations",
-                "model": "Stream Monitor",
-                "manufacturer": "Dreamsong"
-            }
+            sensors.update(self.build_base_sensors(stream_id, stream['name']))
+        return sensors
 
-            # Status sensor discovery
-            status_config = {
-                "name": f"{stream['name']} Status",
-                "icon": "mdi:radio",
-                "unique_id": f"stations_{stream_id}_status",
-                "object_id": f"stations_{stream_id}_status",
-                "state_topic": f"radio-stations/binary_sensor/{stream_id}/status/state",
-                "value_template": "{{ value_json.status }}",
-                "payload_on": "on",
-                "payload_off": "off",
-                "force_update": True,
-                "state_class": "measurement",
-                "availability_topic": f"radio-stations/binary_sensor/{stream_id}/availability",
-                "payload_available": "online",
-                "payload_not_available": "offline",
-                "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/status/attributes",
-                "json_attributes_template": "{{ value_json | tojson }}",
-                "device_class": "connectivity",
-                "device": device_config
-            }
-
-            await client.publish(
-                f"{base_topic}/binary_sensor/stations/{stream_id}/status/config",
-                payload=json.dumps(status_config).encode(),
-                qos=1,
-                retain=True
-            )
-            
-            # Silence sensor discovery
-            silence_config = {
-                "name": f"{stream['name']} Silence",
-                "icon": "mdi:volume-off",
-                "unique_id": f"stations_{stream_id}_silence",
-                "object_id": f"stations_{stream_id}_silence",
-                "state_topic": f"radio-stations/binary_sensor/{stream_id}/silence/state",
-                "value_template": "{{ value_json.silence }}",
-                "payload_on": "on",
-                "payload_off": "off",
-                "force_update": True,
-                "state_class": "measurement",
-                "availability_topic": f"radio-stations/binary_sensor/{stream_id}/availability",
-                "payload_available": "online",
-                "payload_not_available": "offline",
-                "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/silence/attributes",
-                "json_attributes_template": "{{ value_json | tojson }}",
-                "device_class": "problem",
-                "device": device_config
-            }
-            
-            await client.publish(
-                f"{base_topic}/binary_sensor/stations/{stream_id}/silence/config",
-                payload=json.dumps(silence_config).encode(),
-                qos=1,
-                retain=True
-            )
-        logger.info("Discovery configurations published successfully")
-
-    async def update_stream_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
-        """Update stream state and publish to MQTT"""
+    async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
+        """Update sensor states and publish to MQTT"""
         stream = self.streams[stream_id]
         now = datetime.now(timezone.utc)
         
-        # Handle online/offline state
+        state_payload = {}
+        
+        # Update status state
         if online != stream['online']:
             stream['online'] = online
             if online:
@@ -212,28 +189,8 @@ class StreamMonitor:
                 stream['online_start'] = None
                 stream['silent'] = False
                 logger.info(f"Stream {stream_id} is now offline")
-            
-            # Publish status state
-            await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/state",
-                payload=json.dumps({"status": "on" if online else "off"}).encode(),
-                qos=1,
-                retain=True
-            )
-            
-            # Publish status attributes
-            attributes = {
-                "online_since": stream['online_start'].isoformat() if stream['online_start'] else None,
-                "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
-            }
-            await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/attributes",
-                payload=json.dumps(attributes).encode(),
-                qos=1,
-                retain=True
-            )
-        
-        # Handle silence state if stream is online
+
+        # Update silence state
         if online and silent is not None and silent != stream['silent']:
             stream['silent'] = silent
             if silent:
@@ -241,25 +198,90 @@ class StreamMonitor:
                 logger.info(f"Silence detected on stream {stream_id}")
             else:
                 logger.info(f"Audio resumed on stream {stream_id}")
-            
-            # Publish silence state
-            await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/silence/state",
-                payload=json.dumps({"silence": "on" if silent else "off"}).encode(),
-                qos=1,
-                retain=True
-            )
-            
-            # Publish silence attributes
-            attributes = {
-                "silence_since": stream['silence_start'].isoformat() if stream['silence_start'] else None
+
+        # Build combined state payload like system_sensors
+        state_payload = {
+            'status': 'on' if online else 'off',
+            'silence': 'on' if silent else 'off',
+            'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
+            'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
+            'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
+            'last_update': now.isoformat()
+        }
+
+        # Publish state update
+        await client.publish(
+            f"radio-stations/sensor/{stream_id}/state",
+            payload=json.dumps(state_payload),
+            qos=1,
+            retain=True
+        )
+
+    async def publish_discovery(self, client: Client):
+        """Publish Home Assistant MQTT discovery configs"""
+        logger.info("Publishing MQTT discovery configurations")
+        base_topic = "homeassistant"
+        
+        # Build device config once, like system_sensors
+        device_config = {
+            "identifiers": ["radio_stations"],
+            "name": "Radio Stations",
+            "model": "Stream Monitor",
+            "manufacturer": "Dreamsong"
+        }
+
+        for stream_id, stream in self.streams.items():
+            logger.info(f"Publishing discovery config for stream: {stream_id}")
+
+            # Status sensor discovery - following system_sensors pattern
+            status_config = {
+                "name": f"{stream['name']} Status",
+                "state_topic": f"radio-stations/sensor/{stream_id}/state",
+                "value_template": "{{value_json.status}}",
+                "unique_id": f"stations_{stream_id}_status",
+                "object_id": f"stations_{stream_id}_status",
+                "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
+                "device_class": "connectivity",
+                "device": device_config,
+                "icon": "mdi:radio"
             }
+
             await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/silence/attributes",
-                payload=json.dumps(attributes).encode(),
+                f"{base_topic}/binary_sensor/{stream_id}/status/config",
+                payload=json.dumps(status_config).encode(),
                 qos=1,
                 retain=True
             )
+
+            # Silence sensor discovery
+            silence_config = {
+                "name": f"{stream['name']} Silence",
+                "state_topic": f"radio-stations/sensor/{stream_id}/state",
+                "value_template": "{{value_json.silence}}",
+                "unique_id": f"stations_{stream_id}_silence",
+                "object_id": f"stations_{stream_id}_silence",
+                "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
+                "device_class": "problem",
+                "device": device_config,
+                "icon": "mdi:volume-off"
+            }
+
+            await client.publish(
+                f"{base_topic}/binary_sensor/{stream_id}/silence/config",
+                payload=json.dumps(silence_config).encode(),
+                qos=1,
+                retain=True
+            )
+
+            # Initial availability state
+            await client.publish(
+                f"radio-stations/sensor/{stream_id}/availability",
+                payload="online",
+                qos=1,
+                retain=True
+            )
+
+        logger.info("Discovery configurations published successfully")
 
     async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
@@ -271,7 +293,7 @@ class StreamMonitor:
             has_audio = await stream['audio_reader'].read_stream(stream['url'])
             if has_audio:
                 logger.info(f"Stream {stream_id} is available with audio detected")
-                await self.update_stream_state(client, stream_id, True, False)
+                await self.update_sensor_state(client, stream_id, True, False)
             else:
                 # If no audio detected, check if stream is actually available
                 async with aiohttp.ClientSession() as session:
@@ -280,13 +302,13 @@ class StreamMonitor:
                         if response.status == 200:
                             # Stream available but silent
                             logger.info(f"Stream {stream_id} is available but silent")
-                            await self.update_stream_state(client, stream_id, True, True)
+                            await self.update_sensor_state(client, stream_id, True, True)
                         else:
                             logger.warning(f"Stream {stream_id} is not accessible (Status: {response.status})")
-                            await self.update_stream_state(client, stream_id, False)
+                            await self.update_sensor_state(client, stream_id, False)
         except Exception as e:
             logger.error(f"Error checking stream {stream_id}: {e}")
-            await self.update_stream_state(client, stream_id, False)
+            await self.update_sensor_state(client, stream_id, False)
 
     async def monitor_streams(self):
         """Main monitoring loop"""
@@ -305,14 +327,15 @@ class StreamMonitor:
                 
                 # Main monitoring loop
                 while self.running:
-                    # Publish availability for each stream
+                    # Update availability for each stream
                     for stream_id in self.streams:
                         await client.publish(
-                            f"radio-stations/binary_sensor/{stream_id}/availability",
+                            f"radio-stations/sensor/{stream_id}/availability",
                             payload="online",
                             qos=1,
                             retain=True
                         )
+                    
                     logger.info("=== Starting stream check cycle ===")
                     for stream_id in self.streams:
                         await self.check_stream(client, stream_id)
@@ -322,20 +345,38 @@ class StreamMonitor:
         except MqttError as error:
             logger.error(f'MQTT Error: {error}')
 
-    async def run(self):
-        """Run the monitor with error handling and reconnection"""
-        while self.running:
-            try:
-                await self.monitor_streams()
-            except Exception as e:
-                logger.error(f"Monitor error: {e}")
-                await asyncio.sleep(5)
-
 async def main():
+    """Main program entry point - simplified like system_sensors"""
     logger.info("=== Stream Monitor Starting ===")
     monitor = StreamMonitor()
-    logger.info("Starting monitor process...")
-    await monitor.run()
+    
+    # Setup signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    try:
+        logger.info("Starting monitor process...")
+        # Main monitoring loop
+        while True:
+            try:
+                await monitor.monitor_streams()
+            except Exception as e:
+                logger.error(f"Monitor error: {e}")
+                await asyncio.sleep(5)  # Wait before retry
+            
+            if not monitor.running:
+                break
+                
+    except ProgramKilled:
+        logger.info("Program killed: running cleanup code")
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt: running cleanup code")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+    finally:
+        # Cleanup
+        logger.info("Shutting down...")
+        monitor.running = False
 
 if __name__ == "__main__":
     asyncio.run(main())
