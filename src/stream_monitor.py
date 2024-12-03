@@ -146,11 +146,15 @@ class StreamMonitor:
                 "object_id": f"stations_{stream_id}_status",
                 "state_topic": f"radio-stations/binary_sensor/{stream_id}/status/state",
                 "value_template": "{{ value_json.status }}",
+                "payload_on": "on",
+                "payload_off": "off",
+                "force_update": True,
+                "state_class": "measurement",
                 "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/status/attributes",
+                "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "connectivity",
-                "device": device_config  # Same device config for all sensors
+                "device": device_config
             }
-#                'json_attributes_template': '{{ value_json.status | tojson }}',
 
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/status/config",
@@ -167,11 +171,15 @@ class StreamMonitor:
                 "object_id": f"stations_{stream_id}_silence",
                 "state_topic": f"radio-stations/binary_sensor/{stream_id}/silence/state",
                 "value_template": "{{ value_json.silence }}",
+                "payload_on": "on",
+                "payload_off": "off",
+                "force_update": True,
+                "state_class": "measurement",
                 "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/silence/attributes",
-                "device_class": "sound",
-                "device": device_config  # Same device config for all sensors
+                "json_attributes_template": "{{ value_json | tojson }}",
+                "device_class": "problem",
+                "device": device_config
             }
-#                'json_attributes_template': '{{ value_json.silence | tojson }}',
             
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/silence/config",
