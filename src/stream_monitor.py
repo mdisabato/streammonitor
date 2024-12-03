@@ -146,10 +146,11 @@ class StreamMonitor:
                 "state_topic": f"stations/binary_sensor/{stream_id}/status/state",
                 "value_template": "{{ value_json.status }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
-                'json_attributes_template': '{{ value_json.status | tojson }}',
+                "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "connectivity",
                 "device": device_config  # Same device config for all sensors
             }
+#                'json_attributes_template': '{{ value_json.status | tojson }}',
 
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/status/config",
@@ -166,11 +167,12 @@ class StreamMonitor:
                 "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
                 "value_template": "{{ value_json.silence }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
-                'json_attributes_template': '{{ value_json.silence | tojson }}',
+                "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
                 "device": device_config  # Same device config for all sensors
             }
+#                'json_attributes_template': '{{ value_json.silence | tojson }}',
             
             await client.publish(
                 f"{base_topic}/binary_sensor/stations/{stream_id}/silence/config",
@@ -201,10 +203,12 @@ class StreamMonitor:
             # Publish status state
             await client.publish(
                 f"stations/binary_sensor/{stream_id}/status/state",
-                payload=json.dumps({"status": "ON" if online else "OFF"}).encode(),
+                payload="on" if online else "off",
                 qos=1,
                 retain=True
             )
+
+#                payload=json.dumps({"status": "ON" if online else "OFF"}).encode(),
             
             # Publish status attributes
             attributes = {
