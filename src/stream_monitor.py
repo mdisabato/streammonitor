@@ -141,12 +141,13 @@ class StreamMonitor:
             # Status sensor discovery
             status_config = {
                 "name": f"{stream['name']} Status",
+                "icon": "mdi:radio",
                 "unique_id": f"stations_{stream_id}_status",
                 "state_topic": f"stations/binary_sensor/{stream_id}/status/state",
-                "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
-                "device_class": "connectivity",
-                "icon": "mdi:radio",
                 "value_template": "{{ value_json.status }}",
+                "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
+                'json_attributes_template': '{{ value_json.status | tojson }}',
+                "device_class": "connectivity",
                 "device": device_config  # Same device config for all sensors
             }
 
@@ -165,6 +166,7 @@ class StreamMonitor:
                 "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
                 "value_template": "{{ value_json.silence }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
+                'json_attributes_template': '{{ value_json.silence | tojson }}',
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
                 "device": device_config  # Same device config for all sensors
