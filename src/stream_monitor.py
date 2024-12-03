@@ -149,17 +149,17 @@ class StreamMonitor:
         return {
             f'{stream_id}_status': {
                 'name': f'{stream_name} Status',
-                'class': 'connectivity',  # Similar to system_sensors device_class
+                'class': 'connectivity',
                 'sensor_type': 'binary_sensor',
                 'icon': 'mdi:radio',
-                'function': lambda: 'online' if self.streams[stream_id]['online'] else 'offline'
+                'function': lambda: 'ON' if self.streams[stream_id]['online'] else 'OFF'
             },
             f'{stream_id}_silence': {
                 'name': f'{stream_name} Silence',
-                'class': 'problem',  # Matching system_sensors power_status sensor
+                'class': 'problem',
                 'sensor_type': 'binary_sensor',
                 'icon': 'mdi:volume-off',
-                'function': lambda: 'on' if self.streams[stream_id]['silent'] else 'off'
+                'function': lambda: 'ON' if self.streams[stream_id]['silent'] else 'OFF'
             }
         }
 
@@ -174,8 +174,6 @@ class StreamMonitor:
         """Update sensor states and publish to MQTT"""
         stream = self.streams[stream_id]
         now = datetime.now(timezone.utc)
-        
-        state_payload = {}
         
         # Update status state
         if online != stream['online']:
@@ -199,10 +197,10 @@ class StreamMonitor:
             else:
                 logger.info(f"Audio resumed on stream {stream_id}")
 
-        # Build combined state payload like system_sensors
+        # Build combined state payload
         state_payload = {
-            'status': 'on' if online else 'off',
-            'silence': 'on' if silent else 'off',
+            'status': 'ON' if online else 'OFF',
+            'silence': 'ON' if silent else 'OFF',
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
             'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
@@ -222,7 +220,6 @@ class StreamMonitor:
         logger.info("Publishing MQTT discovery configurations")
         base_topic = "homeassistant"
         
-        # Build device config once, like system_sensors
         device_config = {
             "identifiers": ["radio_stations"],
             "name": "Radio Stations",
@@ -233,7 +230,6 @@ class StreamMonitor:
         for stream_id, stream in self.streams.items():
             logger.info(f"Publishing discovery config for stream: {stream_id}")
 
-            # Status sensor discovery - following system_sensors pattern
             status_config = {
                 "name": f"{stream['name']} Status",
                 "state_topic": f"radio-stations/sensor/{stream_id}/state",
@@ -242,6 +238,8 @@ class StreamMonitor:
                 "object_id": f"stations_{stream_id}_status",
                 "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
                 "device_class": "connectivity",
+                "payload_on": "ON",
+                "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:radio"
             }
@@ -253,7 +251,6 @@ class StreamMonitor:
                 retain=True
             )
 
-            # Silence sensor discovery
             silence_config = {
                 "name": f"{stream['name']} Silence",
                 "state_topic": f"radio-stations/sensor/{stream_id}/state",
@@ -262,6 +259,8 @@ class StreamMonitor:
                 "object_id": f"stations_{stream_id}_silence",
                 "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
                 "device_class": "problem",
+                "payload_on": "ON",
+                "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:volume-off"
             }
@@ -273,7 +272,6 @@ class StreamMonitor:
                 retain=True
             )
 
-            # Initial availability state
             await client.publish(
                 f"radio-stations/sensor/{stream_id}/availability",
                 payload="online",
