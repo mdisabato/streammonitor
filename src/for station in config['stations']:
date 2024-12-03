@@ -12,6 +12,7 @@ from typing import Dict, Optional
 import pathlib
 import threading
 from queue import Queue
+import yaml
 
 # Third-party imports
 import aiohttp
@@ -20,12 +21,54 @@ import numpy as np
 import av
 import io
 
+def load_config(config_path):
+    with open(config_path, 'r') as file:
+        return yaml.safe_load(file)
+
+# Load the configuration
+config = load_config("config/stream-monitor.yaml")
+
+# Access MQTT settings
+mqtt_config = config.get('mqtt')
+mqtt_broker = mqtt_config.get('mqtt_broker')
+mqtt_port = mqtt_config.get('mqtt_port')
+mqtt_username = mqtt_config.get('mqtt_username')
+mqtt_password = mqtt_config.get('mqtt_password')
+
+# Access station settings
+stations = config.get('stations', [])
+for station in stations:
+    station_name = station.get('station_name')
+    station_url = station.get('station_url')
+    polling_time = station.get('polling_time', 3600)  # Default polling time: 3600 seconds
+    silence_threshold = station.get('silence_threshold', 15)  # Default silence threshold: 15 seconds
+
+    print(f"Station: {station_name}, URL: {station_url}, Polling Time: {polling_time}, Silence Threshold: {silence_threshold}")
+
 # Set up logging similar to system_sensors.py
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Initialize streams from YAML configuration
+self.streams = {}
+for station in config['stations']:
+    station_id = station['station_name']
+    self.streams[station_id] = {
+        "url": station['station_url'],
+        "name": station['station_name'],
+        "online": False,
+        "silent": False,
+        "last_check": None,
+        "silence_start": None,
+        "online_start": None,
+        "offline_start": None,
+        "audio_reader": AudioStreamReader(),
+        "polling_time": station.get('polling_time', 3600),  # Default 3600 seconds
+        "silence_duration": station.get('silence_threshold', 15)  # Default 15 seconds
+    }
 
 # Exception handling for graceful shutdown
 class ProgramKilled(Exception):
