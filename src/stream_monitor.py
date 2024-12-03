@@ -1,3 +1,4 @@
+```python
 import signal
 import asyncio
 import json
@@ -148,10 +149,11 @@ class StreamMonitor:
                 "value_template": "{{ value_json.status }}",
                 "payload_on": "on",
                 "payload_off": "off",
+                "force_update": True,
+                "state_class": "measurement",
                 "availability_topic": f"radio-stations/binary_sensor/{stream_id}/availability",
                 "payload_available": "online",
                 "payload_not_available": "offline",
-               "state_class": "measurement",
                 "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/status/attributes",
                 "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "connectivity",
@@ -175,11 +177,11 @@ class StreamMonitor:
                 "value_template": "{{ value_json.silence }}",
                 "payload_on": "on",
                 "payload_off": "off",
+                "force_update": True,
+                "state_class": "measurement",
                 "availability_topic": f"radio-stations/binary_sensor/{stream_id}/availability",
                 "payload_available": "online",
                 "payload_not_available": "offline",
-                "force_update": True,
-                "state_class": "measurement",
                 "json_attributes_topic": f"radio-stations/binary_sensor/{stream_id}/silence/attributes",
                 "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "problem",
@@ -214,7 +216,7 @@ class StreamMonitor:
             
             # Publish status state
             await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/state",  # Changed path
+                f"radio-stations/binary_sensor/{stream_id}/status/state",
                 payload=json.dumps({"status": "on" if online else "off"}).encode(),
                 qos=1,
                 retain=True
@@ -226,7 +228,7 @@ class StreamMonitor:
                 "offline_since": stream['offline_start'].isoformat() if stream['offline_start'] else None
             }
             await client.publish(
-                f"radio-stations/binary_sensor/{stream_id}/status/attributes",  # Changed path
+                f"radio-stations/binary_sensor/{stream_id}/status/attributes",
                 payload=json.dumps(attributes).encode(),
                 qos=1,
                 retain=True
@@ -241,7 +243,7 @@ class StreamMonitor:
             else:
                 logger.info(f"Audio resumed on stream {stream_id}")
             
-            # And for silence state:
+            # Publish silence state
             await client.publish(
                 f"radio-stations/binary_sensor/{stream_id}/silence/state",
                 payload=json.dumps({"silence": "on" if silent else "off"}).encode(),
@@ -304,6 +306,14 @@ class StreamMonitor:
                 
                 # Main monitoring loop
                 while self.running:
+                    # Publish availability for each stream
+                    for stream_id in self.streams:
+                        await client.publish(
+                            f"radio-stations/binary_sensor/{stream_id}/availability",
+                            payload="online",
+                            qos=1,
+                            retain=True
+                        )
                     logger.info("=== Starting stream check cycle ===")
                     for stream_id in self.streams:
                         await self.check_stream(client, stream_id)
@@ -316,14 +326,6 @@ class StreamMonitor:
     async def run(self):
         """Run the monitor with error handling and reconnection"""
         while self.running:
-            # Publish availability for each stream
-            for stream_id in self.streams:
-                await client.publish(
-                    f"radio-stations/binary_sensor/{stream_id}/availability",
-                    payload="online",
-                    qos=1,
-                    retain=True
-                )
             try:
                 await self.monitor_streams()
             except Exception as e:
@@ -338,3 +340,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
