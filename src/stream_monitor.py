@@ -146,7 +146,6 @@ class StreamMonitor:
                 "state_topic": f"stations/binary_sensor/{stream_id}/status/state",
                 "value_template": "{{ value_json.status }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
-                "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "connectivity",
                 "device": device_config  # Same device config for all sensors
             }
@@ -167,9 +166,7 @@ class StreamMonitor:
                 "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
                 "value_template": "{{ value_json.silence }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
-                "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "sound",
-                "icon": "mdi:volume-off",
                 "device": device_config  # Same device config for all sensors
             }
 #                'json_attributes_template': '{{ value_json.silence | tojson }}',
