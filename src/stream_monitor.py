@@ -160,12 +160,13 @@ class StreamMonitor:
             # Silence sensor discovery
             silence_config = {
                 "name": f"{stream['name']} Silence",
+                "icon": "mdi:volume-off",
                 "unique_id": f"stations_{stream_id}_silence",
                 "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
+                "value_template": "{{ value_json.silence }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
                 "device_class": "sound",
                 "icon": "mdi:volume-off",
-                "value_template": "{{ value_json.silence }}",
                 "device": device_config  # Same device config for all sensors
             }
             
