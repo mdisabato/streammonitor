@@ -144,7 +144,7 @@ class StreamMonitor:
                 "icon": "mdi:radio",
                 "unique_id": f"stations_{stream_id}_status",
                 "state_topic": f"stations/binary_sensor/{stream_id}/status/state",
-                "value_template": "{{ value }}",
+                "value_template": "{{ value_json.status }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/status/attributes",
                 "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "connectivity",
@@ -165,7 +165,7 @@ class StreamMonitor:
                 "icon": "mdi:volume-off",
                 "unique_id": f"stations_{stream_id}_silence",
                 "state_topic": f"stations/binary_sensor/{stream_id}/silence/state",
-                "value_template": "{{ value }}",
+                "value_template": "{{ value_json.silence }}",
                 "json_attributes_topic": f"stations/binary_sensor/{stream_id}/silence/attributes",
                 "json_attributes_template": "{{ value_json | tojson }}",
                 "device_class": "sound",
@@ -203,12 +203,10 @@ class StreamMonitor:
             # Publish status state
             await client.publish(
                 f"stations/binary_sensor/{stream_id}/status/state",
-                payload="on" if online else "off",
+                payload=json.dumps({"status": "on" if online else "off"}).encode(),
                 qos=1,
                 retain=True
             )
-
-#                payload=json.dumps({"status": "ON" if online else "OFF"}).encode(),
             
             # Publish status attributes
             attributes = {
@@ -231,10 +229,10 @@ class StreamMonitor:
             else:
                 logger.info(f"Audio resumed on stream {stream_id}")
             
-            # Publish silence state
+            # And for silence state:
             await client.publish(
                 f"stations/binary_sensor/{stream_id}/silence/state",
-                payload=("ON" if silent else "OFF").encode(),
+                payload=json.dumps({"silence": "on" if silent else "off"}).encode(),
                 qos=1,
                 retain=True
             )
