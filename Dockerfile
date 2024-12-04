@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app/
 
 # Set the command to run the script
-CMD ["python", "stream_monitor.py"]
+CMD ["python", "stream-monitor.py"]
