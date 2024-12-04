@@ -78,6 +78,13 @@ Author: Created through collaboration
 License: MIT
 """
 
+# Third-party imports
+import aiohttp
+from aiomqtt import Client, MqttError
+import numpy as np
+import av
+import io
+
 # Standard library imports
 import signal
 import asyncio
@@ -90,12 +97,8 @@ import pathlib
 import threading
 from queue import Queue
 
-# Third-party imports
-import aiohttp
-from aiomqtt import Client, MqttError
-import numpy as np
-import av
-import io
+# Add yaml import
+import yaml  # Add to dependencies in documentation
 
 # Configure logging
 logging.basicConfig(
@@ -162,30 +165,37 @@ class AudioStreamReader:
 class StreamMonitor:
     def __init__(self):
         logger.info("Initializing Stream Monitor")
-        # Initialize all required variables
         self.mqtt_client = None
         self.running = True
-        self.devicename = "radio-stations"
-
-        # MQTT Configuration
-        self.mqtt_host = os.getenv('MQTT_HOST', 'localhost')
-        self.mqtt_port = int(os.getenv('MQTT_PORT', '1883'))
-        self.mqtt_user = os.getenv('MQTT_USER')
-        self.mqtt_password = os.getenv('MQTT_PASSWORD')
+        
+        # Load configuration
+        self.config_path = pathlib.Path('/app/config/config.yaml')
+        logger.info("Loading configuration...")
+        self.config = self.load_config()
+        
+        # Initialize from YAML config
+        self.mqtt_host = self.config['mqtt']['mqtt_broker']
+        self.mqtt_port = int(self.config['mqtt']['mqtt_port'])
+        self.mqtt_user = self.config['mqtt']['mqtt_username']
+        self.mqtt_password = self.config['mqtt']['mqtt_password']
+        self.devicename = self.config['mqtt']['mqtt_topic_prefix']
+        
+        # Configure logging level from config
+        log_level = self.config['mqtt'].get('log_level', 'INFO')
+        logging.getLogger().setLevel(getattr(logging, log_level))
+        
         logger.info(f"MQTT Configuration - Host: {self.mqtt_host}, Port: {self.mqtt_port}")
         
-        # Load stream configuration
-        self.config_path = pathlib.Path('/app/config/streams.json')
-        logger.info("Loading stream configuration...")
-        self.streams = self.load_stream_config()
+        # Load streams
+        self.streams = self.initialize_streams()
         
         # Set up signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         logger.info("Stream Monitor initialized successfully")
 
-    def load_stream_config(self) -> Dict:
-        """Load stream configuration from file"""
+    def load_config(self) -> Dict:
+        """Load configuration from YAML file"""
         try:
             logger.info(f"Reading configuration file from: {self.config_path}")
             if not self.config_path.exists():
@@ -193,25 +203,40 @@ class StreamMonitor:
                 raise FileNotFoundError(f"No config file at {self.config_path}")
                 
             with open(self.config_path) as f:
-                config = json.load(f)
+                config = yaml.safe_load(f)
                 logger.info("Successfully parsed configuration file")
             
-            streams = {}
-            for stream_id, stream_config in config.items():
-                logger.info(f"Configuring stream: {stream_id} - {stream_config['name']} at {stream_config['url']}")
-                streams[stream_id] = {
-                    "url": stream_config["url"],
-                    "name": stream_config["name"],
-                    "online": False,
-                    "silent": False,
-                    "last_check": None,
-                    "silence_start": None,
-                    "online_start": None,
-                    "offline_start": None,
-                    "audio_reader": AudioStreamReader()
-                }
-            logger.info(f"Successfully configured {len(streams)} streams")
-            return streams
+            return config
+                
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
+            raise
+
+    def initialize_streams(self) -> Dict:
+        """Initialize streams from YAML configuration"""
+        streams = {}
+        for station in self.config['stations']:
+            stream_id = station['station_name']
+            logger.info(f"Configuring stream: {stream_id} at {station['station_url']}")
+            
+            streams[stream_id] = {
+                "url": station['station_url'],
+                "name": stream_id,
+                "silence_threshold": station.get('silence_threshold', -50.0),
+                "silence_duration": station.get('silence_duration', 15),
+                "chunk_size": station.get('chunk_size', 8192),
+                "debounce_time": station.get('debounce_time', 5),
+                "online": False,
+                "silent": False,
+                "last_check": None,
+                "silence_start": None,
+                "online_start": None,
+                "offline_start": None,
+                "audio_reader": AudioStreamReader(chunk_size=station.get('chunk_size', 8192))
+            }
+        
+        logger.info(f"Successfully configured {len(streams)} streams")
+        return streams
                 
         except Exception as e:
             logger.error(f"Error loading config: {e}")
