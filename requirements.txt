@@ -1,4 +1,5 @@
 aiohttp
+aiomqtt
 numpy
 pydub
 PyYAML
