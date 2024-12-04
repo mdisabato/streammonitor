@@ -26,7 +26,8 @@ def load_config(config_path):
         return yaml.safe_load(file)
 
 # Load the configuration
-config = load_config("config.yaml")
+config_path = "/app/config.yaml"
+config = load_config(config_path)
 
 # Access MQTT settings
 mqtt_config = config.get('mqtt')
