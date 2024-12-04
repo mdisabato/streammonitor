@@ -1,5 +1,4 @@
-aiomqtt>=1.0.0
 aiohttp
 numpy
-av
+pydub
 PyYAML
