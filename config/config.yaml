@@ -1,0 +1,30 @@
+# yaml configuration file for silence-monitor.py
+# mqtt broker configuration
+#
+mqtt:
+  mqtt_broker: 10.1.10.183
+  mqtt_port: 1883
+  mqtt_username: 'user'
+  mqtt_password: 'pwd'
+  mqtt_topic_prefix: radio-stations
+  log_level: INFO # INFO or DEBUG
+  device_unique_id: stations
+  discovery_topic: homeassistant
+#
+# station configuration
+#
+stations:
+  - station_name: mystic_dreams
+    station_url: http://mysticice.i234.me:8200/radio.mp3
+    polling_time: 3600  # Polling time in seconds
+    silence_threshold: 15
+
+  - station_name: ambient_crystals
+    station_url: http://mysticice.i234.me:8210/radio.mp3
+    polling_time: 3600  # Polling time in seconds
+    silence_threshold: 15
+
+  - station_name: christmas_music
+    station_url: http://mysticice.i234.me:8220/radio.mp3
+    polling_time: 3600  # Polling time in seconds
+    silence_threshold: 15
