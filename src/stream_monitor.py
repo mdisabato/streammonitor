@@ -14,11 +14,14 @@ import threading
 from queue import Queue
 import yaml
 
+#additional imports 
+from pydub import AudioSegment
+from pydub.utils import mediainfo
+
 # Third-party imports
 import aiohttp
 from aiomqtt import Client, MqttError
 import numpy as np
-import av
 import io
 
 def load_config(config_path):
