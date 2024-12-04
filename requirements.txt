@@ -1,5 +1,6 @@
 aiohttp
 aiomqtt
+audiostreamreader
 numpy
 pydub
 PyYAML
