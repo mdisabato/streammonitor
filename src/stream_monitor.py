@@ -1,9 +1,15 @@
 
 #!/usr/bin/env python3
+# Required Library Imports
+import aiohttp  # For streaming and checking URLs
+import asyncio  # For async operations
+import numpy as np  # For audio level analysis (RMS, etc.)
+from pydub import AudioSegment  # For audio processing
+import yaml  # For handling YAML configuration files
+import io  # For handling byte streams
 
 # Standard library imports
 import signal
-import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -12,17 +18,12 @@ from typing import Dict, Optional
 import pathlib
 import threading
 from queue import Queue
-import yaml
 
 #additional imports 
-from pydub import AudioSegment
 from pydub.utils import mediainfo
 
 # Third-party imports
-import aiohttp
 from aiomqtt import Client, MqttError
-import numpy as np
-import io
 
 def load_config(config_path):
     with open(config_path, 'r') as file:
