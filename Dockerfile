@@ -26,4 +26,4 @@ RUN adduser -D streammonitor
 USER streammonitor
 
 # Fix the CMD syntax
-CMD ["python", "stream-monitor.py"]
+CMD ["python", "stream_monitor.py"]
