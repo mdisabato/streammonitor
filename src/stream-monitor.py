@@ -266,6 +266,7 @@ class StreamMonitor:
         self.mqtt_user = self.config['mqtt']['mqtt_username']
         self.mqtt_password = self.config['mqtt']['mqtt_password']
         self.devicename = self.config['mqtt']['mqtt_topic_prefix']
+        self.chunk_size = self.config['mqtt'].get('chunk_size', 8192)
         
         # Configure logging level from config
         log_level = self.config['mqtt'].get('log_level', 'INFO')
@@ -308,9 +309,9 @@ class StreamMonitor:
             
             streams[stream_id] = {
                 "url": station['station_url'],
-                "name": stream_id.replace('_', ' ').title(),  # This will convert "mystic_dreams" to "Mystic Dreams"                "silence_threshold": station.get('silence_threshold', -50.0),
+                "name": stream_id.replace('_', ' ').title(),
+                "silence_threshold": station.get('silence_threshold', -50.0),
                 "silence_duration": station.get('silence_duration', 15),
-                "chunk_size": station.get('chunk_size', 8192),
                 "debounce_time": station.get('debounce_time', 5),
                 "online": False,
                 "silent": False,
@@ -318,12 +319,21 @@ class StreamMonitor:
                 "silence_start": None,
                 "online_start": None,
                 "offline_start": None,
-                "audio_reader": AudioStreamReader(chunk_size=station.get('chunk_size', 8192))
+                "audio_reader": AudioStreamReader(
+                    chunk_size=self.chunk_size,
+                    silence_threshold=station.get('silence_threshold', -50.0),
+                    silence_duration=station.get('silence_duration', 15),
+                    debounce_time=station.get('debounce_time', 5)
+                )
             }
+            
+            logger.info(f"Configured {streams[stream_id]['name']} with:")
+            logger.info(f"  Silence threshold: {streams[stream_id]['silence_threshold']} dB")
+            logger.info(f"  Silence duration: {streams[stream_id]['silence_duration']} seconds")
+            logger.info(f"  Debounce time: {streams[stream_id]['debounce_time']} seconds")
         
         logger.info(f"Successfully configured {len(streams)} streams")
         return streams
-
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -398,6 +408,33 @@ class StreamMonitor:
                 retain=True
             )
 
+    async def check_stream(self, client: Client, stream_id: str):
+        """Check a single stream's status and silence"""
+        stream = self.streams[stream_id]
+        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+        
+        try:
+            # Check if stream has audio
+            has_audio = await stream['audio_reader'].read_stream(stream['url'])
+            if has_audio:
+                logger.info(f"Stream {stream_id} is available with audio detected")
+                await self.update_sensor_state(client, stream_id, True, False)
+            else:
+                # If no audio detected, check if stream is actually available
+                async with aiohttp.ClientSession() as session:
+                    logger.info(f"Checking stream {stream_id} accessibility")
+                    async with session.get(stream['url']) as response:
+                        if response.status == 200:
+                            # Stream available but silent
+                            logger.info(f"Stream {stream_id} is available but silent")
+                            await self.update_sensor_state(client, stream_id, True, True)
+                        else:
+                            logger.warning(f"Stream {stream_id} is not accessible (Status: {response.status})")
+                            await self.update_sensor_state(client, stream_id, False)
+        except Exception as e:
+            logger.error(f"Error checking stream {stream_id}: {e}")
+            await self.update_sensor_state(client, stream_id, False)
+
     async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
         """Update sensor states and publish to MQTT"""
         stream = self.streams[stream_id]
@@ -443,43 +480,6 @@ class StreamMonitor:
             retain=True
         )
 
-async def check_stream(self, client: Client, stream_id: str):
-    """Check a single stream's status and silence"""
-    stream = self.streams[stream_id]
-    logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
-    
-    try:
-        # Check stream status and audio levels
-        is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
-        
-        if level_db is not None:  # Stream is accessible
-            logger.info(f"Stream {stream_id} level: {level_db:.2f}dB")
-            await self.update_sensor_state(client, stream_id, True, is_silent)
-            
-            # Update state payload with additional information
-            if format_info:
-                state_payload = {
-                    'status': 'ON',
-                    'silence': 'ON' if is_silent else 'OFF',
-                    'level_db': round(level_db, 2),
-                    'format': format_info,
-                    'last_update': datetime.now(timezone.utc).isoformat()
-                }
-                
-                await client.publish(
-                    f"{self.devicename}/sensor/{stream_id}/state",
-                    payload=json.dumps(state_payload),
-                    qos=1,
-                    retain=True
-                )
-        else:
-            logger.warning(f"Stream {stream_id} is not accessible")
-            await self.update_sensor_state(client, stream_id, False)
-            
-    except Exception as e:
-        logger.error(f"Error checking stream {stream_id}: {e}")
-        await self.update_sensor_state(client, stream_id, False)
-
     async def monitor_streams(self):
         """Main monitoring loop"""
         try:
@@ -513,9 +513,6 @@ async def check_stream(self, client: Client, stream_id: str):
                 
         except MqttError as error:
             logger.error(f'MQTT Error: {error}')
-    def signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        logger.info("Shutdown signal received")
 
 #
 # Main Program Entry Point
