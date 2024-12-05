@@ -88,6 +88,7 @@ from typing import Dict, Optional
 import pathlib
 import threading
 from queue import Queue
+import time
 
 # Add yaml import
 import yaml  # Add to dependencies in documentation
@@ -116,17 +117,14 @@ def signal_handler(signum, frame):
 #
 # Audio Stream Processing
 #
+# Add at top with other imports
+import time
+
 class AudioStreamReader:
     def __init__(self, chunk_size=8192, silence_threshold=-50.0, silence_duration=15, 
                  debounce_time=5):
         """
         Initialize the audio stream reader with configurable parameters
-        
-        Args:
-            chunk_size (int): Size of audio chunks to read (from global config)
-            silence_threshold (float): Threshold in dB below which audio is considered silent
-            silence_duration (int): Duration in seconds to confirm silence
-            debounce_time (int): Time in seconds to debounce state changes
         """
         self.chunk_size = chunk_size
         self.silence_threshold_db = silence_threshold
@@ -135,43 +133,25 @@ class AudioStreamReader:
         self.buffer = Queue()
         self._stop = threading.Event()
         
-        # Historical data for dynamic adjustment - now using fixed size
+        # Historical data for dynamic adjustment
         self.level_history = []
-        self.HISTORY_SIZE = 100  # Fixed value
+        self.HISTORY_SIZE = 100
         self.silence_start_time = None
         self.last_state_change = None
 
     def amplitude_to_db(self, amplitude):
         """Convert raw amplitude to decibels"""
-        return 20 * np.log10(amplitude + 1e-10)  # Adding small value to prevent log(0)
+        return 20 * np.log10(amplitude + 1e-10)
 
     def calculate_rms(self, samples):
         """Calculate Root Mean Square of audio samples"""
         return np.sqrt(np.mean(np.square(samples)))
 
     def is_silent(self, level_db):
-        """
-        Determine if audio level indicates silence
-        Uses both fixed and dynamic thresholds
-        """
-        # Use configured threshold
-        is_below_threshold = level_db < self.silence_threshold_db
-        
-        # If we have enough history, also check against dynamic threshold
-        if len(self.level_history) >= 10:
-            dynamic_threshold = np.percentile(self.level_history, 10) - 10  # 10dB below 10th percentile
-            is_below_dynamic = level_db < dynamic_threshold
-            return is_below_threshold and is_below_dynamic
-        
-        return is_below_threshold
+        """Determine if audio level indicates silence"""
+        return level_db < self.silence_threshold_db
 
-    def update_history(self, level_db):
-        """Update the historical levels for dynamic threshold calculation"""
-        self.level_history.append(level_db)
-        if len(self.level_history) > self.history_size:
-            self.level_history.pop(0)
-
-    async def read_stream(self, url: str) -> bool:
+    async def read_stream(self, url: str) -> tuple[bool, float, dict]:
         """
         Read and analyze audio stream for silence detection
         
@@ -182,69 +162,83 @@ class AudioStreamReader:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
+                        logger.warning(f"HTTP Status {response.status} for {url}")
                         return True, None, None
 
                     chunk = await response.content.read(self.chunk_size)
                     if not chunk:
+                        logger.warning(f"No data received from {url}")
                         return True, None, None
 
-                    # Open stream and get format info
-                    container = av.open(io.BytesIO(chunk))
-                    stream = container.streams.audio[0]
-                    format_info = {
-                        'sample_rate': stream.sample_rate,
-                        'channels': stream.channels,
-                        'format': stream.format.name
-                    }
-                    
-                    # Analyze multiple frames for more accurate silence detection
-                    frame_levels = []
-                    current_time = time.time()
-                    
-                    for frame in container.decode(stream):
-                        samples = frame.to_ndarray().flatten()
-                        rms_level = self.calculate_rms(samples)
-                        level_db = self.amplitude_to_db(rms_level)
-                        frame_levels.append(level_db)
+                    try:
+                        container = av.open(io.BytesIO(chunk))
+                        stream = container.streams.audio[0]
                         
-                        # Update historical data
-                        self.update_history(level_db)
+                        format_info = {
+                            'sample_rate': stream.sample_rate,
+                            'channels': stream.channels,
+                            'format': stream.format.name
+                        }
                         
-                        if len(frame_levels) >= 10:  # Analyze about 10 frames
-                            break
-                    
-                    if not frame_levels:
-                        return True, None, format_info
-                    
-                    # Calculate average level across frames
-                    avg_level_db = np.mean(frame_levels)
-                    is_current_frame_silent = self.is_silent(avg_level_db)
-                    
-                    # Implement silence duration and debouncing
-                    if is_current_frame_silent:
-                        if self.silence_start_time is None:
-                            self.silence_start_time = current_time
+                        # Analyze multiple frames
+                        frame_levels = []
+                        current_time = time.time()
                         
-                        silence_duration = current_time - self.silence_start_time
-                        if silence_duration >= self.silence_duration:
-                            # Check debounce time
+                        for frame in container.decode(stream):
+                            samples = frame.to_ndarray().flatten()
+                            rms_level = self.calculate_rms(samples)
+                            level_db = self.amplitude_to_db(rms_level)
+                            frame_levels.append(level_db)
+                            logger.debug(f"Frame level: {level_db:.2f} dB")
+                            
+                            if len(frame_levels) >= 10:  # Analyze about 10 frames
+                                break
+                        
+                        if not frame_levels:
+                            logger.warning("No audio frames decoded")
+                            return True, None, format_info
+                        
+                        # Calculate average level
+                        avg_level_db = np.mean(frame_levels)
+                        logger.debug(f"Average level: {avg_level_db:.2f} dB")
+                        
+                        # Check silence threshold
+                        is_current_frame_silent = self.is_silent(avg_level_db)
+                        
+                        # Handle silence duration and debouncing
+                        if is_current_frame_silent:
+                            if self.silence_start_time is None:
+                                self.silence_start_time = current_time
+                            
+                            silence_duration = current_time - self.silence_start_time
+                            if silence_duration >= self.silence_duration:
+                                if (self.last_state_change is None or 
+                                    current_time - self.last_state_change >= self.debounce_time):
+                                    self.last_state_change = current_time
+                                    logger.info(f"Silence detected: {avg_level_db:.2f} dB")
+                                    return True, avg_level_db, format_info
+                        else:
+                            self.silence_start_time = None
                             if (self.last_state_change is None or 
                                 current_time - self.last_state_change >= self.debounce_time):
                                 self.last_state_change = current_time
-                                return True, avg_level_db, format_info
-                    else:
-                        self.silence_start_time = None
-                        if (self.last_state_change is None or 
-                            current_time - self.last_state_change >= self.debounce_time):
-                            self.last_state_change = current_time
-                            return False, avg_level_db, format_info
+                                logger.info(f"Audio detected: {avg_level_db:.2f} dB")
+                                return False, avg_level_db, format_info
 
-                    # Return previous state if within debounce period
-                    return self.silence_start_time is not None, avg_level_db, format_info
+                        # Return previous state if within debounce period
+                        return self.silence_start_time is not None, avg_level_db, format_info
+
+                    except Exception as e:
+                        logger.error(f"Error processing audio data: {str(e)}")
+                        return True, None, None
 
         except Exception as e:
             logger.error(f"Error reading audio stream: {str(e)}")
-            return True, None, None  # Consider silence on error
+            return True, None, None
+
+    def stop(self):
+        """Stop the audio reader"""
+        self._stop.set()
 
 #
 # Main Stream Monitor Class
