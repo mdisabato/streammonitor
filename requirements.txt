@@ -3,3 +3,4 @@ aiomqtt
 numpy
 pydub
 PyYAML
+av
