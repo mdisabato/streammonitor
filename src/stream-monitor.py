@@ -423,20 +423,20 @@ class StreamMonitor:
             if level_db is not None:  # Stream is accessible
                 if is_silent:
                     logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
-                    await self.update_sensor_state(client, stream_id, True, True, level_db)
+                    await self.update_(client, stream_id, True, True, level_db)
                 else:
                     logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
-                    await self.update_sensor_state(client, stream_id, True, False, level_db)
+                    await self.update_(client, stream_id, True, False, level_db)
             else:
                 logger.warning(f"Stream {stream_id} is not accessible")
-                await self.update_sensor_state(client, stream_id, False)
+                await self.update_(client, stream_id, False)
             
         except Exception as e:
             logger.error(f"Error checking stream {stream_id}: {e}")
-            await self.update_sensor_state(client, stream_id, False)
+            await self.update_(client, stream_id, False)
 
     async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None, level_db: Optional[float] = None):
-        """Update sensor states and publish to MQTT"""
+        """Update sensor states and attributes, publishing separate MQTT messages for each"""
         stream = self.streams[stream_id]
         now = datetime.now(timezone.utc)
         
@@ -479,21 +479,35 @@ class StreamMonitor:
         }
 
         # Publish state
+       
+        state_topic = f"{self.devicename}/sensor/{stream_id}/state"
+        logger.info(f"Publishing STATE to {state_topic}: {state_payload}")  # Debug log
         await client.publish(
-            f"{self.devicename}/sensor/{stream_id}/state",
+            state_topic,
             payload=json.dumps(state_payload),
             qos=1,
             retain=True
         )
 
-        # Publish attributes
+        # Second message - Attributes only
+        attr_payload = {
+            'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
+            'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
+            'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
+            'level_db': float(round(level_db, 2)) if level_db is not None else None,
+            'last_update': now.isoformat(),
+            'silence': 'ON' if silent else 'OFF'
+        }
+
+        attr_topic = f"{self.devicename}/sensor/{stream_id}/attributes"
+        logger.info(f"Publishing ATTRIBUTES to {attr_topic}: {attr_payload}")  # Debug log
         await client.publish(
-            f"{self.devicename}/sensor/{stream_id}/attributes",
+            attr_topic,
             payload=json.dumps(attr_payload),
             qos=1,
             retain=True
         )
-
+       
     async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
         stream = self.streams[stream_id]
