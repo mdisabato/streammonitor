@@ -324,6 +324,7 @@ class StreamMonitor:
         logger.info(f"Successfully configured {len(streams)} streams")
         return streams
 
+
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         logger.info("Shutdown signal received")
@@ -512,6 +513,9 @@ async def check_stream(self, client: Client, stream_id: str):
                 
         except MqttError as error:
             logger.error(f'MQTT Error: {error}')
+    def signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        logger.info("Shutdown signal received")
 
 #
 # Main Program Entry Point
