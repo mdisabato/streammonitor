@@ -338,7 +338,7 @@ class StreamMonitor:
                 stream['audio_reader'].stop()
 
    
-    async def publish_discovery(self, client: Client):
+   async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs"""
         logger.info("Publishing MQTT discovery configurations")
         base_topic = self.config['mqtt'].get('discovery_topic', 'homeassistant')
@@ -366,14 +366,7 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:radio",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "json_attributes_template": "{{ {\
-                    'level_db': value_json.level_db,\
-                    'last_update': value_json.last_update,\
-                    'online_since': value_json.online_since,\
-                    'offline_since': value_json.offline_since,\
-                    'silence_since': value_json.silence_since\
-                    } | tojson }}"
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
             }
 
             await client.publish(
@@ -395,14 +388,7 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:volume-off",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "json_attributes_template": "{{ {\
-                    'level_db': value_json.level_db,\
-                    'last_update': value_json.last_update,\
-                    'online_since': value_json.online_since,\
-                    'offline_since': value_json.offline_since,\
-                    'silence_since': value_json.silence_since\
-                    } | tojson }}"
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
             }
 
             await client.publish(
@@ -418,6 +404,89 @@ class StreamMonitor:
                 qos=1,
                 retain=True
             )
+
+    async def check_stream(self, client: Client, stream_id: str):
+        """Check a single stream's status and silence"""
+        stream = self.streams[stream_id]
+        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+        
+        try:
+            # Check stream status and audio levels
+            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
+            
+            if level_db is not None:  # Stream is accessible
+                if is_silent:
+                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, True, level_db)
+                else:
+                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, False, level_db)
+            else:
+                logger.warning(f"Stream {stream_id} is not accessible")
+                await self.update_sensor_state(client, stream_id, False)
+            
+        except Exception as e:
+            logger.error(f"Error checking stream {stream_id}: {e}")
+            await self.update_sensor_state(client, stream_id, False)
+
+    async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None, level_db: Optional[float] = None):
+        """Update sensor states and publish to MQTT"""
+        stream = self.streams[stream_id]
+        now = datetime.now(timezone.utc)
+        
+        # Update status state
+        if online != stream['online']:
+            stream['online'] = online
+            if online:
+                stream['online_start'] = now
+                stream['offline_start'] = None
+                logger.info(f"Stream {stream_id} is now online")
+            else:
+                stream['offline_start'] = now
+                stream['online_start'] = None
+                stream['silent'] = False
+                logger.info(f"Stream {stream_id} is now offline")
+
+        # Update silence state
+        if online and silent is not None and silent != stream['silent']:
+            stream['silent'] = silent
+            if silent:
+                stream['silence_start'] = now
+                logger.info(f"Silence detected on stream {stream_id}")
+            else:
+                stream['silence_start'] = None
+                logger.info(f"Audio resumed on stream {stream_id}")
+
+        # Publish state update
+        state_payload = {
+            'status': 'ON' if online else 'OFF',
+            'silence': 'ON' if silent else 'OFF'
+        }
+
+        # Publish attributes update
+        attr_payload = {
+            'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
+            'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
+            'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
+            'level_db': float(round(level_db, 2)) if level_db is not None else None,
+            'last_update': now.isoformat()
+        }
+
+        # Publish state
+        await client.publish(
+            f"{self.devicename}/sensor/{stream_id}/state",
+            payload=json.dumps(state_payload),
+            qos=1,
+            retain=True
+        )
+
+        # Publish attributes
+        await client.publish(
+            f"{self.devicename}/sensor/{stream_id}/attributes",
+            payload=json.dumps(attr_payload),
+            qos=1,
+            retain=True
+        )
 
     async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
