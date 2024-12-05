@@ -339,7 +339,7 @@ class StreamMonitor:
 
 
     async def publish_discovery(self, client: Client):
-        """Publish Home Assistant MQTT discovery configs"""
+        """Publish Home Assistant MQTT discovery configs with separate state and attribute topics"""
         logger.info("Publishing MQTT discovery configurations")
         base_topic = self.config['mqtt'].get('discovery_topic', 'homeassistant')
         device_id = self.config['mqtt'].get('device_unique_id', 'stations')
@@ -357,7 +357,7 @@ class StreamMonitor:
             status_config = {
                 "name": f"{stream['name']} Status",
                 "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "value_template": "{{value_json.status}}",
+                "value_template": "{{ value_json.state }}",  # Changed to match new state format
                 "unique_id": f"{device_id}_{stream_id}_status",
                 "object_id": f"{device_id}_{stream_id}_status",
                 "availability_topic": f"{self.devicename}/sensor/{stream_id}/availability",
@@ -366,9 +366,11 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:radio",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"  # Separate attributes topic
             }
 
+            # Publish status sensor config
+            logger.debug(f"Publishing status sensor config for {stream_id}")
             await client.publish(
                 f"{base_topic}/binary_sensor/{stream_id}/status/config",
                 payload=json.dumps(status_config).encode(),
@@ -376,10 +378,11 @@ class StreamMonitor:
                 retain=True
             )
 
+            # Similar for silence sensor
             silence_config = {
                 "name": f"{stream['name']} Silence",
                 "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "value_template": "{{value_json.silence}}",
+                "value_template": "{{ value_json.silence }}",
                 "unique_id": f"{device_id}_{stream_id}_silence",
                 "object_id": f"{device_id}_{stream_id}_silence",
                 "availability_topic": f"{self.devicename}/sensor/{stream_id}/availability",
@@ -388,9 +391,11 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:volume-off",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"  # Same attributes topic
             }
 
+            # Publish silence sensor config
+            logger.debug(f"Publishing silence sensor config for {stream_id}")
             await client.publish(
                 f"{base_topic}/binary_sensor/{stream_id}/silence/config",
                 payload=json.dumps(silence_config).encode(),
@@ -398,6 +403,7 @@ class StreamMonitor:
                 retain=True
             )
 
+            # Publish availability
             await client.publish(
                 f"{self.devicename}/sensor/{stream_id}/availability",
                 payload="online",
