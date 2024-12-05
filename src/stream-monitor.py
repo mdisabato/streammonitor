@@ -402,44 +402,44 @@ class StreamMonitor:
                 retain=True
             )
 
-      async def check_stream(self, client: Client, stream_id: str):
-           """Check a single stream's status and silence"""
-           stream = self.streams[stream_id]
-           logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
-           
-           try:
-               # Check stream status and audio levels
-               is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
-               
-               if level_db is not None:  # Stream is accessible
-                   if is_silent:
-                       logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
-                       await self.update_sensor_state(client, stream_id, True, True)
-                   else:
-                       logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
-                       await self.update_sensor_state(client, stream_id, True, False)
-                   
-                   # Include audio level in state payload
-                   state_payload = {
-                       'status': 'ON',
-                       'silence': 'ON' if is_silent else 'OFF',
-                       'level_db': round(level_db, 2),
-                       'last_update': datetime.now(timezone.utc).isoformat()
-                   }
-                   
-                   await client.publish(
-                       f"{self.devicename}/sensor/{stream_id}/state",
-                       payload=json.dumps(state_payload),
-                       qos=1,
-                       retain=True
-                   )
-               else:
-                   logger.warning(f"Stream {stream_id} is not accessible")
-                   await self.update_sensor_state(client, stream_id, False)
-               
-           except Exception as e:
-               logger.error(f"Error checking stream {stream_id}: {e}")
-               await self.update_sensor_state(client, stream_id, False)
+    async def check_stream(self, client: Client, stream_id: str):
+        """Check a single stream's status and silence"""
+        stream = self.streams[stream_id]
+        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+        
+        try:
+            # Check stream status and audio levels
+            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
+            
+            if level_db is not None:  # Stream is accessible
+                if is_silent:
+                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, True)
+                else:
+                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, False)
+                
+                # Include audio level in state payload
+                state_payload = {
+                    'status': 'ON',
+                    'silence': 'ON' if is_silent else 'OFF',
+                    'level_db': round(level_db, 2),
+                    'last_update': datetime.now(timezone.utc).isoformat()
+                }
+                
+                await client.publish(
+                    f"{self.devicename}/sensor/{stream_id}/state",
+                    payload=json.dumps(state_payload),
+                    qos=1,
+                    retain=True
+                )
+            else:
+                logger.warning(f"Stream {stream_id} is not accessible")
+                await self.update_sensor_state(client, stream_id, False)
+            
+        except Exception as e:
+            logger.error(f"Error checking stream {stream_id}: {e}")
+            await self.update_sensor_state(client, stream_id, False)
 
     async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
         """Update sensor states and publish to MQTT"""
