@@ -77,13 +77,6 @@ Author: Created through collaboration
 License: MIT
 """
 
-# Third-party imports
-import aiohttp
-from aiomqtt import Client, MqttError
-import numpy as np
-import av
-import io
-
 # Standard library imports
 import signal
 import asyncio
@@ -98,6 +91,13 @@ from queue import Queue
 
 # Add yaml import
 import yaml  # Add to dependencies in documentation
+
+# Third-party imports
+import aiohttp
+from aiomqtt import Client, MqttError
+import numpy as np
+import av
+import io
 
 # Configure logging
 logging.basicConfig(
@@ -236,10 +236,6 @@ class StreamMonitor:
         
         logger.info(f"Successfully configured {len(streams)} streams")
         return streams
-                
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-            raise
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -249,32 +245,14 @@ class StreamMonitor:
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-    def build_base_sensors(self, stream_id: str, stream_name: str) -> dict:
-        """Build base sensor configurations for a stream"""
-        return {
-            f'{stream_id}_status': {
-                'name': f'{stream_name} Status',
-                'class': 'connectivity',
-                'sensor_type': 'binary_sensor',
-                'icon': 'mdi:radio',
-                'function': lambda: 'ON' if self.streams[stream_id]['online'] else 'OFF'
-            },
-            f'{stream_id}_silence': {
-                'name': f'{stream_name} Silence',
-                'class': 'problem',
-                'sensor_type': 'binary_sensor',
-                'icon': 'mdi:volume-off',
-                'function': lambda: 'ON' if self.streams[stream_id]['silent'] else 'OFF'
-            }
-        }
-
     async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs"""
         logger.info("Publishing MQTT discovery configurations")
-        base_topic = "homeassistant"
+        base_topic = self.config['mqtt'].get('discovery_topic', 'homeassistant')
+        device_id = self.config['mqtt'].get('device_unique_id', 'stations')
         
         device_config = {
-            "identifiers": ["radio_stations"],
+            "identifiers": [device_id],
             "name": "Radio Stations",
             "model": "Stream Monitor",
             "manufacturer": "Dreamsong"
@@ -285,11 +263,11 @@ class StreamMonitor:
 
             status_config = {
                 "name": f"{stream['name']} Status",
-                "state_topic": f"radio-stations/sensor/{stream_id}/state",
+                "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
                 "value_template": "{{value_json.status}}",
-                "unique_id": f"stations_{stream_id}_status",
-                "object_id": f"stations_{stream_id}_status",
-                "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
+                "unique_id": f"{device_id}_{stream_id}_status",
+                "object_id": f"{device_id}_{stream_id}_status",
+                "availability_topic": f"{self.devicename}/sensor/{stream_id}/availability",
                 "device_class": "connectivity",
                 "payload_on": "ON",
                 "payload_off": "OFF",
@@ -306,11 +284,11 @@ class StreamMonitor:
 
             silence_config = {
                 "name": f"{stream['name']} Silence",
-                "state_topic": f"radio-stations/sensor/{stream_id}/state",
+                "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
                 "value_template": "{{value_json.silence}}",
-                "unique_id": f"stations_{stream_id}_silence",
-                "object_id": f"stations_{stream_id}_silence",
-                "availability_topic": f"radio-stations/sensor/{stream_id}/availability",
+                "unique_id": f"{device_id}_{stream_id}_silence",
+                "object_id": f"{device_id}_{stream_id}_silence",
+                "availability_topic": f"{self.devicename}/sensor/{stream_id}/availability",
                 "device_class": "problem",
                 "payload_on": "ON",
                 "payload_off": "OFF",
@@ -326,13 +304,11 @@ class StreamMonitor:
             )
 
             await client.publish(
-                f"radio-stations/sensor/{stream_id}/availability",
+                f"{self.devicename}/sensor/{stream_id}/availability",
                 payload="online",
                 qos=1,
                 retain=True
             )
-
-        logger.info("Discovery configurations published successfully")
 
     async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
         """Update sensor states and publish to MQTT"""
@@ -373,7 +349,7 @@ class StreamMonitor:
 
         # Publish state update
         await client.publish(
-            f"radio-stations/sensor/{stream_id}/state",
+            f"{self.devicename}/sensor/{stream_id}/state",
             payload=json.dumps(state_payload),
             qos=1,
             retain=True
@@ -421,12 +397,11 @@ class StreamMonitor:
                 await self.publish_discovery(client)
                 logger.info("Discovery configs published")
                 
-                # Main monitoring loop
                 while self.running:
                     # Update availability for each stream
                     for stream_id in self.streams:
                         await client.publish(
-                            f"radio-stations/sensor/{stream_id}/availability",
+                            f"{self.devicename}/sensor/{stream_id}/availability",
                             payload="online",
                             qos=1,
                             retain=True
