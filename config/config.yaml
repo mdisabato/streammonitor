@@ -4,8 +4,8 @@
 mqtt:
   mqtt_broker: 10.1.10.183
   mqtt_port: 1883
-  mqtt_username: 'iotuser'
-  mqtt_password: '3ERv5V1l'
+  mqtt_username: 
+  mqtt_password: 
   mqtt_topic_prefix: radio-stations
   log_level: INFO # INFO or DEBUG
   device_unique_id: stations
