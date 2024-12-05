@@ -274,17 +274,21 @@ class StreamMonitor:
         logger.info("Loading configuration...")
         self.config = self.load_config()
         
-        # Initialize from YAML config
-        self.mqtt_host = self.config['mqtt']['mqtt_broker']
-        self.mqtt_port = int(self.config['mqtt']['mqtt_port'])
-        self.mqtt_user = self.config['mqtt']['mqtt_username']
-        self.mqtt_password = self.config['mqtt']['mqtt_password']
+        # Initialize from YAML config with environment variable override
+        self.mqtt_host = os.getenv('MQTT_HOST', self.config['mqtt']['mqtt_broker'])
+        self.mqtt_port = int(os.getenv('MQTT_PORT', str(self.config['mqtt']['mqtt_port'])))
+        self.mqtt_user = os.getenv('MQTT_USER', self.config['mqtt']['mqtt_username'])
+        self.mqtt_password = os.getenv('MQTT_PASSWORD', self.config['mqtt']['mqtt_password'])
         self.devicename = self.config['mqtt']['mqtt_topic_prefix']
         self.chunk_size = self.config['mqtt'].get('chunk_size', 8192)
         
         # Configure logging level from config
         log_level = self.config['mqtt'].get('log_level', 'INFO')
         logging.getLogger().setLevel(getattr(logging, log_level))
+      
+        # Debug log to show which configuration is being used
+        logger.debug(f"Using MQTT Configuration from {'environment' if os.getenv('MQTT_HOST') else 'config file'}")
+        logger.info(f"MQTT Configuration - Host: {self.mqtt_host}, Port: {self.mqtt_port}")
         
         # Always log MQTT configuration
         logger.info(f"MQTT Configuration - Host: {self.mqtt_host}, Port: {self.mqtt_port}")
