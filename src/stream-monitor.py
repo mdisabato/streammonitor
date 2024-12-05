@@ -361,7 +361,7 @@ class StreamMonitor:
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-async def publish_discovery(self, client: Client):
+    async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs with separate state and attribute topics"""
         # Always log discovery start
         logger.info("Publishing MQTT discovery configurations")
