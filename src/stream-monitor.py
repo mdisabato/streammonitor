@@ -117,17 +117,16 @@ def signal_handler(signum, frame):
 # Audio Stream Processing
 #
 class AudioStreamReader:
-    def __init__(self, chunk_size=1024*8, silence_threshold=-50.0, silence_duration=15, 
-                 debounce_time=5, history_size=100):
+    def __init__(self, chunk_size=8192, silence_threshold=-50.0, silence_duration=15, 
+                 debounce_time=5):
         """
         Initialize the audio stream reader with configurable parameters
         
         Args:
-            chunk_size (int): Size of audio chunks to read
+            chunk_size (int): Size of audio chunks to read (from global config)
             silence_threshold (float): Threshold in dB below which audio is considered silent
             silence_duration (int): Duration in seconds to confirm silence
             debounce_time (int): Time in seconds to debounce state changes
-            history_size (int): Number of samples to keep for dynamic threshold adjustment
         """
         self.chunk_size = chunk_size
         self.silence_threshold_db = silence_threshold
@@ -136,9 +135,9 @@ class AudioStreamReader:
         self.buffer = Queue()
         self._stop = threading.Event()
         
-        # Historical data for dynamic adjustment
+        # Historical data for dynamic adjustment - now using fixed size
         self.level_history = []
-        self.history_size = history_size
+        self.HISTORY_SIZE = 100  # Fixed value
         self.silence_start_time = None
         self.last_state_change = None
 
