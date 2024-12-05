@@ -19,16 +19,16 @@ stations:
     station_url: http://mysticice.i234.me:8200/radio.mp3
     silence_threshold: -50.0  # in dB
     silence_duration: 15  # in seconds
-    debounce_time: 5  # Optional, seconds to confirm silence
+    debounce_time: 7  # Optional, seconds to confirm silence
 
   - station_name: ambient_crystals
     station_url: http://mysticice.i234.me:8210/radio.mp3
     silence_threshold: -48.0
-    silence_duration: 10
-    debounce_time: 5  # Optional, seconds to confirm silence
+    silence_duration: 20
+    debounce_time: 7  # Optional, seconds to confirm silence
 
   - station_name: christmas_music
     station_url: http://mysticice.i234.me:8220/radio.mp3
     silence_threshold: -45.0
-    silence_duration: 20
-    debounce_time: 5  # Optional, seconds to confirm silence
+    silence_duration: 17
+    debounce_time: 7  # Optional, seconds to confirm silence
