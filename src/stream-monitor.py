@@ -423,7 +423,7 @@ class StreamMonitor:
                 state_payload = {
                     'status': 'ON',
                     'silence': 'ON' if is_silent else 'OFF',
-                    'level_db': round(level_db, 2),
+                    'level_db': float(round(level_db, 2)),  # Convert NumPy float32 to Python float
                     'last_update': datetime.now(timezone.utc).isoformat()
                 }
                 
