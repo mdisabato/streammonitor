@@ -402,29 +402,41 @@ class StreamMonitor:
                 retain=True
             )
 
-    async def check_stream(self, client: Client, stream_id: str):
+async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
         stream = self.streams[stream_id]
         logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
         
         try:
-            # Check if stream has audio
-            has_audio = await stream['audio_reader'].read_stream(stream['url'])
-            if has_audio:
-                logger.info(f"Stream {stream_id} is available with audio detected")
-                await self.update_sensor_state(client, stream_id, True, False)
+            # Check stream status and audio levels
+            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
+            
+            if level_db is not None:  # Stream is accessible
+                if is_silent:
+                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, True)
+                else:
+                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, False)
+                
+                # Include audio level in state payload
+                state_payload = {
+                    'status': 'ON',
+                    'silence': 'ON' if is_silent else 'OFF',
+                    'level_db': round(level_db, 2),
+                    'last_update': datetime.now(timezone.utc).isoformat()
+                }
+                
+                await client.publish(
+                    f"{self.devicename}/sensor/{stream_id}/state",
+                    payload=json.dumps(state_payload),
+                    qos=1,
+                    retain=True
+                )
             else:
-                # If no audio detected, check if stream is actually available
-                async with aiohttp.ClientSession() as session:
-                    logger.info(f"Checking stream {stream_id} accessibility")
-                    async with session.get(stream['url']) as response:
-                        if response.status == 200:
-                            # Stream available but silent
-                            logger.info(f"Stream {stream_id} is available but silent")
-                            await self.update_sensor_state(client, stream_id, True, True)
-                        else:
-                            logger.warning(f"Stream {stream_id} is not accessible (Status: {response.status})")
-                            await self.update_sensor_state(client, stream_id, False)
+                logger.warning(f"Stream {stream_id} is not accessible")
+                await self.update_sensor_state(client, stream_id, False)
+            
         except Exception as e:
             logger.error(f"Error checking stream {stream_id}: {e}")
             await self.update_sensor_state(client, stream_id, False)
