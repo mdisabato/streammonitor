@@ -402,7 +402,7 @@ class StreamMonitor:
                 retain=True
             )
 
-async def check_stream(self, client: Client, stream_id: str):
+   async def check_stream(self, client: Client, stream_id: str):
         """Check a single stream's status and silence"""
         stream = self.streams[stream_id]
         logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
