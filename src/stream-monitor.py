@@ -337,7 +337,8 @@ class StreamMonitor:
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-async def publish_discovery(self, client: Client):
+   
+    async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs"""
         logger.info("Publishing MQTT discovery configurations")
         base_topic = self.config['mqtt'].get('discovery_topic', 'homeassistant')
@@ -366,7 +367,13 @@ async def publish_discovery(self, client: Client):
                 "device": device_config,
                 "icon": "mdi:radio",
                 "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "json_attributes_template": "{{ {'level_db': value_json.level_db, 'last_update': value_json.last_update} | tojson }}"
+                "json_attributes_template": "{{ {\
+                    'level_db': value_json.level_db,\
+                    'last_update': value_json.last_update,\
+                    'online_since': value_json.online_since,\
+                    'offline_since': value_json.offline_since,\
+                    'silence_since': value_json.silence_since\
+                    } | tojson }}"
             }
 
             await client.publish(
@@ -389,7 +396,13 @@ async def publish_discovery(self, client: Client):
                 "device": device_config,
                 "icon": "mdi:volume-off",
                 "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "json_attributes_template": "{{ {'level_db': value_json.level_db, 'last_update': value_json.last_update} | tojson }}"
+                "json_attributes_template": "{{ {\
+                    'level_db': value_json.level_db,\
+                    'last_update': value_json.last_update,\
+                    'online_since': value_json.online_since,\
+                    'offline_since': value_json.offline_since,\
+                    'silence_since': value_json.silence_since\
+                    } | tojson }}"
             }
 
             await client.publish(
