@@ -11,30 +11,40 @@ Features:
 - Integrates with Home Assistant through MQTT auto-discovery
 - Groups all stations under a single device in Home Assistant
 - Provides detailed status attributes including timestamps
+- Configurable silence thresholds per stream
+- Dynamic audio level monitoring
+- Debounce protection against false positives
 
-Configuration Requirements:
--------------------------
-1. Environment Variables:
-   MQTT_HOST: MQTT broker hostname (default: localhost)
-   MQTT_PORT: MQTT broker port (default: 1883)
-   MQTT_USER: MQTT username
-   MQTT_PASSWORD: MQTT password
+Configuration:
+-------------
+YAML configuration file (config/config.yaml):
 
-2. Configuration File (config/streams.json):
-   {
-     "station_id": {
-       "url": "http://stream.url:port/mount.mp3",
-       "name": "Display Name"
-     },
-     ...
-   }
-   Example:
-   {
-     "christmas_music": {
-       "url": "http://server:8220/radio.mp3",
-       "name": "Christmas Music"
-     }
-   }
+mqtt:
+  mqtt_broker: broker_address
+  mqtt_port: 1883
+  mqtt_username: user
+  mqtt_password: pass
+  mqtt_topic_prefix: radio-stations
+  log_level: INFO  # INFO or DEBUG
+  chunk_size: 8192  # Optional, bytes
+  device_unique_id: stations
+  discovery_topic: homeassistant
+
+stations:
+  - station_name: station_one
+    station_url: http://stream.url:port/mount.mp3
+    silence_threshold: -50.0  # in dB
+    silence_duration: 15  # in seconds
+    debounce_time: 5  # in seconds
+  ...
+
+Example:
+  stations:
+    - station_name: christmas_music
+      station_url: http://server:8220/radio.mp3
+      silence_threshold: -45.0
+      silence_duration: 20
+      debounce_time: 5
 
 Home Assistant Integration:
 -------------------------
@@ -43,26 +53,24 @@ The script creates:
 2. For each station:
    - Binary sensor for online/offline status
    - Binary sensor for silence detection
-   - Attributes including timestamps for status changes
-
-Each sensor includes:
-- Online/offline status
-- Silence detection
-- Last update time
-- Duration calculations
-- Auto-discovery configuration
+   - Attributes including:
+     * Audio level in dB
+     * Online/offline timestamps
+     * Silence detection timestamps
+     * Last update time
 
 Troubleshooting:
 ---------------
 1. Check MQTT connection:
    - Verify MQTT broker is accessible
-   - Check credentials
+   - Check credentials in YAML config
    - Confirm MQTT topics in broker
 
 2. Stream Monitoring:
    - Verify stream URLs are accessible
-   - Check audio detection threshold
+   - Check silence_threshold in config
    - Monitor logs for connection issues
+   - Verify audio levels in attributes
 
 3. Home Assistant:
    - Verify MQTT integration is configured
@@ -71,43 +79,45 @@ Troubleshooting:
 
 Dependencies:
 ------------
-pip install aiomqtt aiohttp numpy av
+pip install pyyaml aiomqtt aiohttp numpy av
 
 Author: Created through collaboration
 License: MIT
 """
 
-# Standard library imports
+#
+# Imports and Configuration
+#
 import signal
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 import pathlib
 import threading
 from queue import Queue
 import time
-
-# Add yaml import
-import yaml  # Add to dependencies in documentation
+import json
+import io
 
 # Third-party imports
+import yaml
 import aiohttp
 from aiomqtt import Client, MqttError
 import numpy as np
 import av
-import io
 
-# Configure logging
+# Configure base logging - will be updated from config file
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Exception handling for graceful shutdown
+#
+# Exception Handling
+#
 class ProgramKilled(Exception):
     pass
 
@@ -115,16 +125,19 @@ def signal_handler(signum, frame):
     raise ProgramKilled
 
 #
-# Audio Stream Processing
+# Audio Processing
 #
-# Add at top with other imports
-import time
-
 class AudioStreamReader:
-    def __init__(self, chunk_size=8192, silence_threshold=-50.0, silence_duration=15, 
-                 debounce_time=5):
+    def __init__(self, chunk_size: int = 8192, silence_threshold: float = -50.0, 
+                 silence_duration: int = 15, debounce_time: int = 5):
         """
         Initialize the audio stream reader with configurable parameters
+        
+        Args:
+            chunk_size: Size of audio chunks to read
+            silence_threshold: dB level below which audio is considered silent
+            silence_duration: Seconds of silence before triggering
+            debounce_time: Seconds to wait before state changes
         """
         self.chunk_size = chunk_size
         self.silence_threshold_db = silence_threshold
@@ -139,29 +152,30 @@ class AudioStreamReader:
         self.silence_start_time = None
         self.last_state_change = None
 
-    def amplitude_to_db(self, amplitude):
+    def amplitude_to_db(self, amplitude: float) -> float:
         """Convert raw amplitude to decibels"""
         return 20 * np.log10(amplitude + 1e-10)
 
-    def calculate_rms(self, samples):
+    def calculate_rms(self, samples: np.ndarray) -> float:
         """Calculate Root Mean Square of audio samples"""
         return np.sqrt(np.mean(np.square(samples)))
 
-    def is_silent(self, level_db):
+    def is_silent(self, level_db: float) -> bool:
         """Determine if audio level indicates silence"""
         return level_db < self.silence_threshold_db
 
-    async def read_stream(self, url: str) -> tuple[bool, float, dict]:
+    async def read_stream(self, url: str) -> Tuple[bool, Optional[float], Optional[dict]]:
         """
         Read and analyze audio stream for silence detection
         
         Returns:
-            tuple: (is_silent: bool, level_db: float, format_info: dict)
+            Tuple of (is_silent: bool, level_db: float, format_info: dict)
         """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
+                        # Always log connection issues
                         logger.warning(f"HTTP Status {response.status} for {url}")
                         return True, None, None
 
@@ -189,6 +203,7 @@ class AudioStreamReader:
                             rms_level = self.calculate_rms(samples)
                             level_db = self.amplitude_to_db(rms_level)
                             frame_levels.append(level_db)
+                            # Debug level - frame-by-frame analysis
                             logger.debug(f"Frame level: {level_db:.2f} dB")
                             
                             if len(frame_levels) >= 10:  # Analyze about 10 frames
@@ -200,6 +215,7 @@ class AudioStreamReader:
                         
                         # Calculate average level
                         avg_level_db = np.mean(frame_levels)
+                        # Debug level - average calculations
                         logger.debug(f"Average level: {avg_level_db:.2f} dB")
                         
                         # Check silence threshold
@@ -215,6 +231,7 @@ class AudioStreamReader:
                                 if (self.last_state_change is None or 
                                     current_time - self.last_state_change >= self.debounce_time):
                                     self.last_state_change = current_time
+                                    # Always log silence detection
                                     logger.info(f"Silence detected: {avg_level_db:.2f} dB")
                                     return True, avg_level_db, format_info
                         else:
@@ -222,6 +239,7 @@ class AudioStreamReader:
                             if (self.last_state_change is None or 
                                 current_time - self.last_state_change >= self.debounce_time):
                                 self.last_state_change = current_time
+                                # Always log audio detection
                                 logger.info(f"Audio detected: {avg_level_db:.2f} dB")
                                 return False, avg_level_db, format_info
 
@@ -245,6 +263,8 @@ class AudioStreamReader:
 #
 class StreamMonitor:
     def __init__(self):
+        """Initialize the Stream Monitor with configuration from YAML"""
+        # Always log startup
         logger.info("Initializing Stream Monitor")
         self.mqtt_client = None
         self.running = True
@@ -266,6 +286,7 @@ class StreamMonitor:
         log_level = self.config['mqtt'].get('log_level', 'INFO')
         logging.getLogger().setLevel(getattr(logging, log_level))
         
+        # Always log MQTT configuration
         logger.info(f"MQTT Configuration - Host: {self.mqtt_host}, Port: {self.mqtt_port}")
         
         # Load streams
@@ -299,6 +320,7 @@ class StreamMonitor:
         streams = {}
         for station in self.config['stations']:
             stream_id = station['station_name']
+            # Always log stream configuration
             logger.info(f"Configuring stream: {stream_id} at {station['station_url']}")
             
             streams[stream_id] = {
@@ -321,6 +343,7 @@ class StreamMonitor:
                 )
             }
             
+            # Always log stream settings
             logger.info(f"Configured {streams[stream_id]['name']} with:")
             logger.info(f"  Silence threshold: {streams[stream_id]['silence_threshold']} dB")
             logger.info(f"  Silence duration: {streams[stream_id]['silence_duration']} seconds")
@@ -331,15 +354,16 @@ class StreamMonitor:
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
+        # Always log shutdown
         logger.info("Shutdown signal received")
         self.running = False
         for stream in self.streams.values():
             if 'audio_reader' in stream:
                 stream['audio_reader'].stop()
 
-
-    async def publish_discovery(self, client: Client):
+async def publish_discovery(self, client: Client):
         """Publish Home Assistant MQTT discovery configs with separate state and attribute topics"""
+        # Always log discovery start
         logger.info("Publishing MQTT discovery configurations")
         base_topic = self.config['mqtt'].get('discovery_topic', 'homeassistant')
         device_id = self.config['mqtt'].get('device_unique_id', 'stations')
@@ -352,12 +376,13 @@ class StreamMonitor:
         }
 
         for stream_id, stream in self.streams.items():
+            # Always log individual stream discovery
             logger.info(f"Publishing discovery config for stream: {stream_id}")
 
             status_config = {
                 "name": f"{stream['name']} Status",
                 "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
-                "value_template": "{{ value_json.state }}",  # Changed to match new state format
+                "value_template": "{{ value_json.state }}",
                 "unique_id": f"{device_id}_{stream_id}_status",
                 "object_id": f"{device_id}_{stream_id}_status",
                 "availability_topic": f"{self.devicename}/sensor/{stream_id}/availability",
@@ -366,10 +391,10 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:radio",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"  # Separate attributes topic
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
             }
 
-            # Publish status sensor config
+            # Debug level - detailed config info
             logger.debug(f"Publishing status sensor config for {stream_id}")
             await client.publish(
                 f"{base_topic}/binary_sensor/{stream_id}/status/config",
@@ -378,7 +403,6 @@ class StreamMonitor:
                 retain=True
             )
 
-            # Similar for silence sensor
             silence_config = {
                 "name": f"{stream['name']} Silence",
                 "state_topic": f"{self.devicename}/sensor/{stream_id}/state",
@@ -391,10 +415,9 @@ class StreamMonitor:
                 "payload_off": "OFF",
                 "device": device_config,
                 "icon": "mdi:volume-off",
-                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"  # Same attributes topic
+                "json_attributes_topic": f"{self.devicename}/sensor/{stream_id}/attributes"
             }
 
-            # Publish silence sensor config
             logger.debug(f"Publishing silence sensor config for {stream_id}")
             await client.publish(
                 f"{base_topic}/binary_sensor/{stream_id}/silence/config",
@@ -411,131 +434,8 @@ class StreamMonitor:
                 retain=True
             )
 
-    async def check_stream(self, client: Client, stream_id: str):
-        """Check a single stream's status and silence"""
-        stream = self.streams[stream_id]
-        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
-        
-        try:
-            # Check stream status and audio levels
-            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
-            
-            if level_db is not None:  # Stream is accessible
-                if is_silent:
-                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
-                    await self.update_(client, stream_id, True, True, level_db)
-                else:
-                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
-                    await self.update_(client, stream_id, True, False, level_db)
-            else:
-                logger.warning(f"Stream {stream_id} is not accessible")
-                await self.update_(client, stream_id, False)
-            
-        except Exception as e:
-            logger.error(f"Error checking stream {stream_id}: {e}")
-            await self.update_(client, stream_id, False)
-
     async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None, level_db: Optional[float] = None):
         """Update sensor states and attributes, publishing separate MQTT messages for each"""
-        stream = self.streams[stream_id]
-        now = datetime.now(timezone.utc)
-        
-        # State update logic remains the same
-        if online != stream['online']:
-            stream['online'] = online
-            if online:
-                stream['online_start'] = now
-                stream['offline_start'] = None
-                logger.info(f"Stream {stream_id} is now online")
-            else:
-                stream['offline_start'] = now
-                stream['online_start'] = None
-                stream['silent'] = False
-                logger.info(f"Stream {stream_id} is now offline")
-
-        if online and silent is not None and silent != stream['silent']:
-            stream['silent'] = silent
-            if silent:
-                stream['silence_start'] = now
-                logger.info(f"Silence detected on stream {stream_id}")
-            else:
-                stream['silence_start'] = None
-                logger.info(f"Audio resumed on stream {stream_id}")
-
-        # CHANGE: Separate state and attribute messages
-        # State message - just the essential state
-        state_payload = {
-            'state': 'ON' if online else 'OFF'
-        }
-        
-        # Attribute message - all the additional info
-        attr_payload = {
-            'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
-            'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
-            'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
-            'level_db': float(round(level_db, 2)) if level_db is not None else None,
-            'last_update': now.isoformat(),
-            'silence': 'ON' if silent else 'OFF'
-        }
-
-        # Publish both messages
-        logger.info(f"Publishing state for {stream_id}: {state_payload}")
-        await client.publish(
-            f"{self.devicename}/sensor/{stream_id}/state",
-            payload=json.dumps(state_payload),
-            qos=1,
-            retain=True
-        )
-
-        logger.info(f"Publishing attributes for {stream_id}: {attr_payload}")
-        await client.publish(
-            f"{self.devicename}/sensor/{stream_id}/attributes",
-            payload=json.dumps(attr_payload),
-            qos=1,
-            retain=True
-        )
-       
-    async def check_stream(self, client: Client, stream_id: str):
-        """Check a single stream's status and silence"""
-        stream = self.streams[stream_id]
-        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
-        
-        try:
-            # Check stream status and audio levels
-            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
-            
-            if level_db is not None:  # Stream is accessible
-                if is_silent:
-                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
-                    await self.update_sensor_state(client, stream_id, True, True)
-                else:
-                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
-                    await self.update_sensor_state(client, stream_id, True, False)
-                
-                # Include audio level in state payload
-                state_payload = {
-                    'status': 'ON',
-                    'silence': 'ON' if is_silent else 'OFF',
-                    'level_db': float(round(level_db, 2)),  # Convert NumPy float32 to Python float
-                    'last_update': datetime.now(timezone.utc).isoformat()
-                }
-                
-                await client.publish(
-                    f"{self.devicename}/sensor/{stream_id}/state",
-                    payload=json.dumps(state_payload),
-                    qos=1,
-                    retain=True
-                )
-            else:
-                logger.warning(f"Stream {stream_id} is not accessible")
-                await self.update_sensor_state(client, stream_id, False)
-            
-        except Exception as e:
-            logger.error(f"Error checking stream {stream_id}: {e}")
-            await self.update_sensor_state(client, stream_id, False)
-
-    async def update_sensor_state(self, client: Client, stream_id: str, online: bool, silent: Optional[bool] = None):
-        """Update sensor states and publish to MQTT"""
         stream = self.streams[stream_id]
         now = datetime.now(timezone.utc)
         
@@ -545,6 +445,7 @@ class StreamMonitor:
             if online:
                 stream['online_start'] = now
                 stream['offline_start'] = None
+                # Always log state changes
                 logger.info(f"Stream {stream_id} is now online")
             else:
                 stream['offline_start'] = now
@@ -559,19 +460,26 @@ class StreamMonitor:
                 stream['silence_start'] = now
                 logger.info(f"Silence detected on stream {stream_id}")
             else:
+                stream['silence_start'] = None
                 logger.info(f"Audio resumed on stream {stream_id}")
 
-        # Build combined state payload
+        # State message - just the essential state
         state_payload = {
-            'status': 'ON' if online else 'OFF',
-            'silence': 'ON' if silent else 'OFF',
+            'state': 'ON' if online else 'OFF',
+            'silence': 'ON' if silent else 'OFF'
+        }
+
+        # Attribute message - all the additional info
+        attr_payload = {
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
             'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
+            'level_db': float(round(level_db, 2)) if level_db is not None else None,
             'last_update': now.isoformat()
         }
 
-        # Publish state update
+        # Debug level - MQTT payload contents
+        logger.debug(f"Publishing state for {stream_id}: {state_payload}")
         await client.publish(
             f"{self.devicename}/sensor/{stream_id}/state",
             payload=json.dumps(state_payload),
@@ -579,9 +487,45 @@ class StreamMonitor:
             retain=True
         )
 
+        logger.debug(f"Publishing attributes for {stream_id}: {attr_payload}")
+        await client.publish(
+            f"{self.devicename}/sensor/{stream_id}/attributes",
+            payload=json.dumps(attr_payload),
+            qos=1,
+            retain=True
+        )
+
+async def check_stream(self, client: Client, stream_id: str):
+        """Check a single stream's status and silence"""
+        stream = self.streams[stream_id]
+        # Always log stream checks
+        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+        
+        try:
+            # Check stream status and audio levels
+            is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
+            
+            if level_db is not None:  # Stream is accessible
+                if is_silent:
+                    # Always log silence status
+                    logger.info(f"Stream {stream_id} is available but silent (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, True, level_db)
+                else:
+                    # Always log audio status
+                    logger.info(f"Stream {stream_id} is available with audio detected (Level: {level_db:.2f}dB)")
+                    await self.update_sensor_state(client, stream_id, True, False, level_db)
+            else:
+                logger.warning(f"Stream {stream_id} is not accessible")
+                await self.update_sensor_state(client, stream_id, False)
+            
+        except Exception as e:
+            logger.error(f"Error checking stream {stream_id}: {e}")
+            await self.update_sensor_state(client, stream_id, False)
+
     async def monitor_streams(self):
         """Main monitoring loop"""
         try:
+            # Always log connection attempts
             logger.info(f"Attempting MQTT connection to {self.mqtt_host}:{self.mqtt_port}")
             async with Client(
                 hostname=self.mqtt_host,
@@ -604,6 +548,7 @@ class StreamMonitor:
                             retain=True
                         )
                     
+                    # Always log monitoring cycles
                     logger.info("=== Starting stream check cycle ===")
                     for stream_id in self.streams:
                         await self.check_stream(client, stream_id)
@@ -650,3 +595,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+   
