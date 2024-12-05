@@ -440,7 +440,7 @@ class StreamMonitor:
         stream = self.streams[stream_id]
         now = datetime.now(timezone.utc)
         
-        # Update status state
+        # State update logic remains the same
         if online != stream['online']:
             stream['online'] = online
             if online:
@@ -453,7 +453,6 @@ class StreamMonitor:
                 stream['silent'] = False
                 logger.info(f"Stream {stream_id} is now offline")
 
-        # Update silence state
         if online and silent is not None and silent != stream['silent']:
             stream['silent'] = silent
             if silent:
@@ -463,33 +462,13 @@ class StreamMonitor:
                 stream['silence_start'] = None
                 logger.info(f"Audio resumed on stream {stream_id}")
 
-        # Publish state update
+        # CHANGE: Separate state and attribute messages
+        # State message - just the essential state
         state_payload = {
-            'status': 'ON' if online else 'OFF',
-            'silence': 'ON' if silent else 'OFF'
+            'state': 'ON' if online else 'OFF'
         }
-
-        # Publish attributes update
-        attr_payload = {
-            'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
-            'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
-            'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
-            'level_db': float(round(level_db, 2)) if level_db is not None else None,
-            'last_update': now.isoformat()
-        }
-
-        # Publish state
-       
-        state_topic = f"{self.devicename}/sensor/{stream_id}/state"
-        logger.info(f"Publishing STATE to {state_topic}: {state_payload}")  # Debug log
-        await client.publish(
-            state_topic,
-            payload=json.dumps(state_payload),
-            qos=1,
-            retain=True
-        )
-
-        # Second message - Attributes only
+        
+        # Attribute message - all the additional info
         attr_payload = {
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
@@ -499,10 +478,18 @@ class StreamMonitor:
             'silence': 'ON' if silent else 'OFF'
         }
 
-        attr_topic = f"{self.devicename}/sensor/{stream_id}/attributes"
-        logger.info(f"Publishing ATTRIBUTES to {attr_topic}: {attr_payload}")  # Debug log
+        # Publish both messages
+        logger.info(f"Publishing state for {stream_id}: {state_payload}")
         await client.publish(
-            attr_topic,
+            f"{self.devicename}/sensor/{stream_id}/state",
+            payload=json.dumps(state_payload),
+            qos=1,
+            retain=True
+        )
+
+        logger.info(f"Publishing attributes for {stream_id}: {attr_payload}")
+        await client.publish(
+            f"{self.devicename}/sensor/{stream_id}/attributes",
             payload=json.dumps(attr_payload),
             qos=1,
             retain=True
