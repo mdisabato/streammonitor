@@ -117,46 +117,135 @@ def signal_handler(signum, frame):
 # Audio Stream Processing
 #
 class AudioStreamReader:
-    def __init__(self, chunk_size=1024*8):
+    def __init__(self, chunk_size=1024*8, silence_threshold=-50.0, silence_duration=15, 
+                 debounce_time=5, history_size=100):
+        """
+        Initialize the audio stream reader with configurable parameters
+        
+        Args:
+            chunk_size (int): Size of audio chunks to read
+            silence_threshold (float): Threshold in dB below which audio is considered silent
+            silence_duration (int): Duration in seconds to confirm silence
+            debounce_time (int): Time in seconds to debounce state changes
+            history_size (int): Number of samples to keep for dynamic threshold adjustment
+        """
         self.chunk_size = chunk_size
+        self.silence_threshold_db = silence_threshold
+        self.silence_duration = silence_duration
+        self.debounce_time = debounce_time
         self.buffer = Queue()
         self._stop = threading.Event()
+        
+        # Historical data for dynamic adjustment
+        self.level_history = []
+        self.history_size = history_size
+        self.silence_start_time = None
+        self.last_state_change = None
 
-    def stop(self):
-        self._stop.set()
+    def amplitude_to_db(self, amplitude):
+        """Convert raw amplitude to decibels"""
+        return 20 * np.log10(amplitude + 1e-10)  # Adding small value to prevent log(0)
+
+    def calculate_rms(self, samples):
+        """Calculate Root Mean Square of audio samples"""
+        return np.sqrt(np.mean(np.square(samples)))
+
+    def is_silent(self, level_db):
+        """
+        Determine if audio level indicates silence
+        Uses both fixed and dynamic thresholds
+        """
+        # Use configured threshold
+        is_below_threshold = level_db < self.silence_threshold_db
+        
+        # If we have enough history, also check against dynamic threshold
+        if len(self.level_history) >= 10:
+            dynamic_threshold = np.percentile(self.level_history, 10) - 10  # 10dB below 10th percentile
+            is_below_dynamic = level_db < dynamic_threshold
+            return is_below_threshold and is_below_dynamic
+        
+        return is_below_threshold
+
+    def update_history(self, level_db):
+        """Update the historical levels for dynamic threshold calculation"""
+        self.level_history.append(level_db)
+        if len(self.level_history) > self.history_size:
+            self.level_history.pop(0)
 
     async def read_stream(self, url: str) -> bool:
-        """Read audio stream and check for silence"""
+        """
+        Read and analyze audio stream for silence detection
+        
+        Returns:
+            tuple: (is_silent: bool, level_db: float, format_info: dict)
+        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
                     if response.status != 200:
-                        return False
+                        return True, None, None
 
                     chunk = await response.content.read(self.chunk_size)
                     if not chunk:
-                        return False
+                        return True, None, None
 
+                    # Open stream and get format info
                     container = av.open(io.BytesIO(chunk))
                     stream = container.streams.audio[0]
+                    format_info = {
+                        'sample_rate': stream.sample_rate,
+                        'channels': stream.channels,
+                        'format': stream.format.name
+                    }
                     
-                    frame_count = 0
-                    max_level = 0.0
+                    # Analyze multiple frames for more accurate silence detection
+                    frame_levels = []
+                    current_time = time.time()
                     
                     for frame in container.decode(stream):
-                        frame_count += 1
-                        if frame_count > 10:  # Check just a few frames
-                            break
-                            
                         samples = frame.to_ndarray().flatten()
-                        level = np.abs(samples).max()
-                        max_level = max(max_level, level)
+                        rms_level = self.calculate_rms(samples)
+                        level_db = self.amplitude_to_db(rms_level)
+                        frame_levels.append(level_db)
+                        
+                        # Update historical data
+                        self.update_history(level_db)
+                        
+                        if len(frame_levels) >= 10:  # Analyze about 10 frames
+                            break
+                    
+                    if not frame_levels:
+                        return True, None, format_info
+                    
+                    # Calculate average level across frames
+                    avg_level_db = np.mean(frame_levels)
+                    is_current_frame_silent = self.is_silent(avg_level_db)
+                    
+                    # Implement silence duration and debouncing
+                    if is_current_frame_silent:
+                        if self.silence_start_time is None:
+                            self.silence_start_time = current_time
+                        
+                        silence_duration = current_time - self.silence_start_time
+                        if silence_duration >= self.silence_duration:
+                            # Check debounce time
+                            if (self.last_state_change is None or 
+                                current_time - self.last_state_change >= self.debounce_time):
+                                self.last_state_change = current_time
+                                return True, avg_level_db, format_info
+                    else:
+                        self.silence_start_time = None
+                        if (self.last_state_change is None or 
+                            current_time - self.last_state_change >= self.debounce_time):
+                            self.last_state_change = current_time
+                            return False, avg_level_db, format_info
 
-                    return max_level > 0.001  # Adjust threshold as needed
+                    # Return previous state if within debounce period
+                    return self.silence_start_time is not None, avg_level_db, format_info
 
         except Exception as e:
-            logger.error(f"Error reading audio stream: {e}")
-            return False
+            logger.error(f"Error reading audio stream: {str(e)}")
+            return True, None, None  # Consider silence on error
 
 #
 # Main Stream Monitor Class
@@ -220,8 +309,7 @@ class StreamMonitor:
             
             streams[stream_id] = {
                 "url": station['station_url'],
-                "name": stream_id,
-                "silence_threshold": station.get('silence_threshold', -50.0),
+                "name": stream_id.replace('_', ' ').title(),  # This will convert "mystic_dreams" to "Mystic Dreams"                "silence_threshold": station.get('silence_threshold', -50.0),
                 "silence_duration": station.get('silence_duration', 15),
                 "chunk_size": station.get('chunk_size', 8192),
                 "debounce_time": station.get('debounce_time', 5),
@@ -355,32 +443,42 @@ class StreamMonitor:
             retain=True
         )
 
-    async def check_stream(self, client: Client, stream_id: str):
-        """Check a single stream's status and silence"""
-        stream = self.streams[stream_id]
-        logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+async def check_stream(self, client: Client, stream_id: str):
+    """Check a single stream's status and silence"""
+    stream = self.streams[stream_id]
+    logger.info(f"Checking stream {stream_id} ({stream['name']}) at {stream['url']}")
+    
+    try:
+        # Check stream status and audio levels
+        is_silent, level_db, format_info = await stream['audio_reader'].read_stream(stream['url'])
         
-        try:
-            # Check if stream has audio
-            has_audio = await stream['audio_reader'].read_stream(stream['url'])
-            if has_audio:
-                logger.info(f"Stream {stream_id} is available with audio detected")
-                await self.update_sensor_state(client, stream_id, True, False)
-            else:
-                # If no audio detected, check if stream is actually available
-                async with aiohttp.ClientSession() as session:
-                    logger.info(f"Checking stream {stream_id} accessibility")
-                    async with session.get(stream['url']) as response:
-                        if response.status == 200:
-                            # Stream available but silent
-                            logger.info(f"Stream {stream_id} is available but silent")
-                            await self.update_sensor_state(client, stream_id, True, True)
-                        else:
-                            logger.warning(f"Stream {stream_id} is not accessible (Status: {response.status})")
-                            await self.update_sensor_state(client, stream_id, False)
-        except Exception as e:
-            logger.error(f"Error checking stream {stream_id}: {e}")
+        if level_db is not None:  # Stream is accessible
+            logger.info(f"Stream {stream_id} level: {level_db:.2f}dB")
+            await self.update_sensor_state(client, stream_id, True, is_silent)
+            
+            # Update state payload with additional information
+            if format_info:
+                state_payload = {
+                    'status': 'ON',
+                    'silence': 'ON' if is_silent else 'OFF',
+                    'level_db': round(level_db, 2),
+                    'format': format_info,
+                    'last_update': datetime.now(timezone.utc).isoformat()
+                }
+                
+                await client.publish(
+                    f"{self.devicename}/sensor/{stream_id}/state",
+                    payload=json.dumps(state_payload),
+                    qos=1,
+                    retain=True
+                )
+        else:
+            logger.warning(f"Stream {stream_id} is not accessible")
             await self.update_sensor_state(client, stream_id, False)
+            
+    except Exception as e:
+        logger.error(f"Error checking stream {stream_id}: {e}")
+        await self.update_sensor_state(client, stream_id, False)
 
     async def monitor_streams(self):
         """Main monitoring loop"""
