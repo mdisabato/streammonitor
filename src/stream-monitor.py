@@ -449,23 +449,33 @@ class StreamMonitor:
             if online:
                 stream['online_start'] = now
                 stream['offline_start'] = None
-                # Always log state changes
                 logger.info(f"Stream {stream_id} is now online")
             else:
                 stream['offline_start'] = now
                 stream['online_start'] = None
                 stream['silent'] = False
+                stream['silence_start'] = None  # Reset silence timing on offline
                 logger.info(f"Stream {stream_id} is now offline")
 
-        # Update silence state
+        # Update silence state and timing
         if online and silent is not None and silent != stream['silent']:
             stream['silent'] = silent
             if silent:
                 stream['silence_start'] = now
                 logger.info(f"Silence detected on stream {stream_id}")
             else:
+                # Calculate duration before clearing start time
+                if stream['silence_start']:
+                    stream['silence_duration'] = (now - stream['silence_start']).total_seconds()
+                    logger.info(f"Audio resumed after {stream['silence_duration']:.1f} seconds of silence")
+                else:
+                    stream['silence_duration'] = 0
                 stream['silence_start'] = None
-                logger.info(f"Audio resumed on stream {stream_id}")
+
+        # Calculate current silence duration if in silent state
+        current_silence_duration = None
+        if stream['silent'] and stream['silence_start']:
+            current_silence_duration = (now - stream['silence_start']).total_seconds()
 
         # State message - just the essential state
         state_payload = {
@@ -478,6 +488,8 @@ class StreamMonitor:
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
             'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
+            'silence_duration': round(current_silence_duration, 1) if current_silence_duration is not None else None,
+            'last_silence_duration': round(stream.get('silence_duration', 0), 1),
             'level_db': float(round(level_db, 2)) if level_db is not None else None,
             'last_update': now.isoformat()
         }
