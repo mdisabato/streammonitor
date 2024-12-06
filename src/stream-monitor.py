@@ -339,6 +339,8 @@ class StreamMonitor:
                 "silence_start": None,
                 "online_start": None,
                 "offline_start": None,
+                "last_silence_time": None,
+                "last_silence_duration": None,              
                 "audio_reader": AudioStreamReader(
                     chunk_size=self.chunk_size,
                     silence_threshold=station.get('silence_threshold', -50.0),
@@ -456,7 +458,7 @@ class StreamMonitor:
                 stream['silent'] = False
                 stream['silence_start'] = None  # Reset silence timing on offline
                 logger.info(f"Stream {stream_id} is now offline")
-
+              
         # Update silence state and timing
         if online and silent is not None and silent != stream['silent']:
             stream['silent'] = silent
@@ -464,12 +466,11 @@ class StreamMonitor:
                 stream['silence_start'] = now
                 logger.info(f"Silence detected on stream {stream_id}")
             else:
-                # Calculate duration before clearing start time
+                # Update historical values when silence ends
                 if stream['silence_start']:
-                    stream['silence_duration'] = (now - stream['silence_start']).total_seconds()
-                    logger.info(f"Audio resumed after {stream['silence_duration']:.1f} seconds of silence")
-                else:
-                    stream['silence_duration'] = 0
+                    stream['last_silence_time'] = stream['silence_start']
+                    stream['last_silence_duration'] = (now - stream['silence_start']).total_seconds()
+                    logger.info(f"Audio resumed after {stream['last_silence_duration']:.1f} seconds of silence")
                 stream['silence_start'] = None
 
         # Calculate current silence duration if in silent state
@@ -477,19 +478,14 @@ class StreamMonitor:
         if stream['silent'] and stream['silence_start']:
             current_silence_duration = (now - stream['silence_start']).total_seconds()
 
-        # State message - just the essential state
-        state_payload = {
-            'state': 'ON' if online else 'OFF',
-            'silence': 'ON' if silent else 'OFF'
-        }
-
-        # Attribute message - all the additional info
+        # Attribute message with historical data
         attr_payload = {
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
             'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
-            'silence_duration': round(current_silence_duration, 1) if current_silence_duration is not None else None,
-            'last_silence_duration': round(stream.get('silence_duration', 0), 1),
+            'current_silence_duration': round(current_silence_duration, 1) if current_silence_duration is not None else None,
+            'last_silence_time': stream['last_silence_time'].isoformat() if 'last_silence_time' in stream and stream['last_silence_time'] else None,
+            'last_silence_duration': round(stream['last_silence_duration'], 1) if 'last_silence_duration' in stream else None,
             'level_db': float(round(level_db, 2)) if level_db is not None else None,
             'last_update': now.isoformat()
         }
