@@ -458,7 +458,7 @@ class StreamMonitor:
                 stream['silent'] = False
                 stream['silence_start'] = None  # Reset silence timing on offline
                 logger.info(f"Stream {stream_id} is now offline")
-              
+
         # Update silence state and timing
         if online and silent is not None and silent != stream['silent']:
             stream['silent'] = silent
@@ -478,7 +478,13 @@ class StreamMonitor:
         if stream['silent'] and stream['silence_start']:
             current_silence_duration = (now - stream['silence_start']).total_seconds()
 
-# Attribute message with historical data
+        # State message - Essential state
+        state_payload = {
+            'state': 'ON' if online else 'OFF',
+            'silence': 'ON' if silent else 'OFF'
+        }
+
+        # Attribute message with historical data
         attr_payload = {
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
@@ -490,8 +496,7 @@ class StreamMonitor:
             'last_update': now.isoformat()
         }
 
-      
-        # Debug level - MQTT payload contents
+        # Publish state
         logger.debug(f"Publishing state for {stream_id}: {state_payload}")
         await client.publish(
             f"{self.devicename}/sensor/{stream_id}/state",
@@ -500,6 +505,7 @@ class StreamMonitor:
             retain=True
         )
 
+        # Publish attributes
         logger.debug(f"Publishing attributes for {stream_id}: {attr_payload}")
         await client.publish(
             f"{self.devicename}/sensor/{stream_id}/attributes",
