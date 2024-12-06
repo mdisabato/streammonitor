@@ -478,18 +478,19 @@ class StreamMonitor:
         if stream['silent'] and stream['silence_start']:
             current_silence_duration = (now - stream['silence_start']).total_seconds()
 
-        # Attribute message with historical data
+# Attribute message with historical data
         attr_payload = {
             'online_since': stream['online_start'].isoformat() if stream['online_start'] else None,
             'offline_since': stream['offline_start'].isoformat() if stream['offline_start'] else None,
             'silence_since': stream['silence_start'].isoformat() if stream['silence_start'] else None,
             'current_silence_duration': round(current_silence_duration, 1) if current_silence_duration is not None else None,
             'last_silence_time': stream['last_silence_time'].isoformat() if 'last_silence_time' in stream and stream['last_silence_time'] else None,
-            'last_silence_duration': round(stream['last_silence_duration'], 1) if 'last_silence_duration' in stream else None,
+            'last_silence_duration': round(stream['last_silence_duration'], 1) if 'last_silence_duration' in stream and stream['last_silence_duration'] is not None else None,
             'level_db': float(round(level_db, 2)) if level_db is not None else None,
             'last_update': now.isoformat()
         }
 
+      
         # Debug level - MQTT payload contents
         logger.debug(f"Publishing state for {stream_id}: {state_payload}")
         await client.publish(
