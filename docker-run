@@ -1,9 +1,13 @@
-docker run -d \
+sudo docker run -d \
   --name stream-monitor \
   --restart unless-stopped \
-  -v $(pwd)/config:/app/config \
-  -e MQTT_HOST=10.1.10.183 \
-  -e MQTT_PORT=1883 \
-  -e MQTT_USER=your_mqtt_user \
-  -e MQTT_PASSWORD=your_mqtt_password \
+  -v /home/docker/stream_monitor/config:/app/config \
   stream-monitor
+
+# If you do not want to put access credentials in the config.yaml file,
+# use these lines or an ENV file
+#  -e MQTT_USER=userid \
+#  -e MQTT_PASSWORD=password \
+#
+# change this statement "-v /home/docker/stream_monitor/config:/app/config \"
+# to reflect the location of the config file outside the docker container.
