@@ -558,6 +558,8 @@ class StreamMonitor:
                 logger.info("Discovery configs published")
                 
                 while self.running:
+                    # Publish discovery configs for all stations
+                    await self.publish_discovery(client)
                     # Update availability for each stream
                     for stream_id in self.streams:
                         await client.publish(
